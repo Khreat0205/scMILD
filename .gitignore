@@ -1,7 +1,0 @@
-*.pt
-*.tsv
-*.h5ad
-*.npz
-*.txt
-*.h5seurat
-*.mtx
