@@ -8,7 +8,7 @@ import numpy as np
 import copy
 import pandas as pd
 from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve, f1_score
-
+# from torch.utils.tensorboard import SummaryWriter
 
 
 class Optimizer:
@@ -73,25 +73,25 @@ class Optimizer:
             else:
                 combined_metric = (1-bag_auc_ByTeacher_withAttnScore)
             
-            if epoch > self.epoch_warmup:
-                if combined_metric < best_combined_metric:
-                    best_combined_metric = combined_metric
-                    best_model_wts_teacher = copy.deepcopy(self.model_teacher.state_dict())
-                    best_model_wts_student = copy.deepcopy(self.model_student.state_dict())
-                    best_model_wts_encoder = copy.deepcopy(self.model_encoder.state_dict())
-                    loss_test, test_auc, test_f1macro_withAttn, test_accuracy = self.evaluate_teacher(epoch, test=True)
-                    self.writer.add_scalar('Test/Loss', loss_test, epoch)
-                    self.writer.add_scalar('Test/AUC', test_auc, epoch)
-                    self.writer.add_scalar('Test/F1-Macro', test_f1macro_withAttn, epoch)
-                    self.writer.add_scalar('Test/Accuracy', test_accuracy, epoch)
-                    
-                    
-                    no_improvement = 0
-                else:
-                    no_improvement += 1
-                    if no_improvement >= self.patience:
-                        print(colored(f'Early stopping at epoch {epoch}',"red"))
-                        break
+        
+            if combined_metric < best_combined_metric:
+                best_combined_metric = combined_metric
+                best_model_wts_teacher = copy.deepcopy(self.model_teacher.state_dict())
+                best_model_wts_student = copy.deepcopy(self.model_student.state_dict())
+                best_model_wts_encoder = copy.deepcopy(self.model_encoder.state_dict())
+                loss_test, test_auc, test_f1macro_withAttn, test_accuracy = self.evaluate_teacher(epoch, test=True)
+                self.writer.add_scalar('Test/Loss', loss_test, epoch)
+                self.writer.add_scalar('Test/AUC', test_auc, epoch)
+                self.writer.add_scalar('Test/F1-Macro', test_f1macro_withAttn, epoch)
+                self.writer.add_scalar('Test/Accuracy', test_accuracy, epoch)
+                
+                
+                no_improvement = 0
+            else:
+                no_improvement += 1
+                if no_improvement >= self.patience:
+                    print(colored(f'Early stopping at epoch {epoch}',"red"))
+                    break
         self.model_teacher.load_state_dict(best_model_wts_teacher)
         self.model_encoder.load_state_dict(best_model_wts_encoder)
         self.model_student.load_state_dict(best_model_wts_student)
@@ -231,7 +231,7 @@ class Optimizer:
         instance_label_pred = []
         bag_label_gt = []
         bag_label_pred_withAttnScore = []
-        bag_label_pred_withStudentPred =[]
+        # bag_label_pred_withStudentPred =[]
         total_loss = 0.0
         total_samples = 0
         for i, (t_data, t_bagids, t_labels) in enumerate(loader):
@@ -282,7 +282,7 @@ class Optimizer:
         # instance_label_pred = torch.cat(instance_label_pred, dim=0)
         bag_label_gt = torch.cat(bag_label_gt, dim=0)
         bag_label_pred_withAttnScore = torch.cat(bag_label_pred_withAttnScore, dim=0)
-        bag_label_pred_withStudentPred = torch.cat(bag_label_pred_withStudentPred, dim=0)
+        # bag_label_pred_withStudentPred = torch.cat(bag_label_pred_withStudentPred, dim=0)
         # instance_label_pred_normed = (instance_label_pred - instance_label_pred.min()) / (instance_label_pred.max() - instance_label_pred.min())
         # instance_auc_ByTeacher = roc_auc_score(instance_label_gt.cpu().detach().numpy(), instance_label_pred_normed.cpu().detach().numpy())
         

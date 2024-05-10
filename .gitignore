@@ -5,3 +5,8 @@
 *.txt
 *.h5seurat
 *.mtx
+*.pyc
+*.pkl
+*.pth
+*.csv
+events.out.tfevents.*

@@ -9,13 +9,13 @@ import numpy as np
 import argparse
 import json
 import random
+import copy
 from utils import *
 from dataset import *
 from model import *
 from tqdm import tqdm as tdqm
 import time
 
-ae_prototypes = 3
 ae_learning_rate = 1e-3
 ae_epochs = 250
 ae_patience = 15
@@ -33,13 +33,13 @@ hyperparameters_dict = {
 }
 
 
-dir_path="lupus/disease"
-base_path = f"../ProtoCell4P-main/data/{dir_path}/"
-target_dir = f'{base_path}/VAE/'
+# dir_path="lupus/disease"
+base_path = f"data/NS"
+target_dir = f'{base_path}/AE/'
 if not os.path.exists(target_dir):
     os.makedirs(target_dir, exist_ok=False)
 
-hyperparameter_file_path = os.path.join(target_dir, 'hyperparameters_vae_8.json')
+hyperparameter_file_path = os.path.join(target_dir, 'hyperparameters_ae.json')
 if not os.path.exists(hyperparameter_file_path):
     with open(hyperparameter_file_path, 'w') as file:
         json.dump(hyperparameters_dict, file, indent=4)
@@ -49,16 +49,30 @@ device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cp
 print("INFO: Using device: {}".format(device))
 
 
-
-def load_dataset_and_preprocessors(base_path, exp, device):
-    train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
+# def load_dataset_and_preprocessors(base_path, exp, device):
+#     train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
+#     val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
+#     test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
     
-    with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
-        label_encoder = pickle.load(f)
+#     with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
+#         label_encoder = pickle.load(f)
 
-    return train_dataset, val_dataset, test_dataset, label_encoder
+#     return train_dataset, val_dataset, test_dataset, label_encoder
+
+
+
+origin_path = '/home/local/kyeonghunjeong_920205/nipa_bu/COVID19/3.analysis/9.MIL/ProtoCell4P-main/data/covid'
+def load_dataset_and_preprocessors(base_path, exp):
+    train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt")
+    val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt")
+    test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt")
+    
+    with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt_only2.pkl", 'rb') as f:
+        label_encoder = pickle.load(f)
+    # with open(f"{base_path}/scaler_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
+    #     scaler = pickle.load(f)
+
+    return train_dataset, val_dataset, test_dataset, label_encoder# , scaler
 
 
 def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
@@ -113,7 +127,6 @@ def _train_or_test(model=None, dataloader=None, optimizer=None, device='cuda'):
 
 def train(model, optimizer=None, dataloader=None, device='cuda'):
     assert(optimizer is not None)
-    
     print('\ttrain')
     model.train()
     return _train_or_test(model, optimizer=optimizer, dataloader=dataloader,device=device)
@@ -162,17 +175,16 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     return ae
 
 
-# exp = 2
 
 for exp in tdqm(range(1,9),  desc="Experiment"):
     ################################## Load Dataset - Instance ###############
-    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp,device)
+    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(origin_path, exp)
 
     train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
     val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     del train_dataset, val_dataset, test_dataset
-    # randomness
+    
     torch.manual_seed(exp)
     torch.cuda.manual_seed(exp)
     torch.backends.cudnn.deterministic = True
@@ -180,6 +192,7 @@ for exp in tdqm(range(1,9),  desc="Experiment"):
     np.random.seed(exp)
     random.seed(exp)
     torch.cuda.manual_seed_all(exp)
+    
     ################################## Set Encoding Model ####################
     ae = AENB(input_dim=3000, latent_dim=ae_latent_dim, 
                         device=device, hidden_layers=ae_hidden_layers, 
@@ -187,10 +200,10 @@ for exp in tdqm(range(1,9),  desc="Experiment"):
 
     ae_optimizer = torch.optim.Adam(ae.parameters(), lr= ae_learning_rate)
     ################################## Training VAE ####################
-    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb8_{exp}.pth")
+    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb_{exp}.pth")
 
 
-    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb8_test.csv")
+    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb_test.csv")
     
     del train_dl, val_dl, test_dl, ae, ae_optimizer, test_recon
     torch.cuda.empty_cache()

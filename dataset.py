@@ -94,20 +94,6 @@ def collate_np(batch):
 ############################################################
 ############################################################
 
-def load_dataset_and_preprocessors(base_path, exp):
-    train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count.pt")
-    val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count.pt")
-    test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count.pt")
-    
-    with open(f"{base_path}/label_encoder_exp{exp}_HVG_count.pkl", 'rb') as f:
-        label_encoder = pickle.load(f)
-    # with open(f"{base_path}/scaler_exp{exp}_HVG_count.pkl", 'rb') as f:
-        # scaler = pickle.load(f)
-
-    return train_dataset, val_dataset, test_dataset, label_encoder # , scaler
-
-
-
 class InstanceDataset(Dataset):
     '''
     인스턴스 단위로 데이터를 반환하는 Dataset 클래스.
@@ -191,7 +177,7 @@ class InstanceDataset2(Dataset):
         return data, bag_id, instance_label, bag_label
     
 
-def update_instance_labels_with_bag_labels(instance_dataset):
+def update_instance_labels_with_bag_labels(instance_dataset, device):
     """
     Updates the instance labels in the InstanceDataset with the corresponding bag labels.
     
