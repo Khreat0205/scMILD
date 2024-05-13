@@ -14,7 +14,7 @@ from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curv
 class Optimizer:
     def __init__(self, exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student,
                 optimizer_encoder,bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,
-                n_epochs, device, val_combined_metric=True, stuOptPeriod=3, stu_loss_weight_neg = 0.3, writer=None, patience=15, csv='tmp.csv', saved_path=None):
+                n_epochs, device, val_combined_metric=True, stuOptPeriod=3, stu_loss_weight_neg = 0.3, writer=None, patience=15, csv='tmp.csv', saved_path=None, epoch_warmup=0):
         self.model_teacher = model_teacher
         self.model_student = model_student
         self.model_encoder = model_encoder
@@ -47,6 +47,7 @@ class Optimizer:
         
         self.best_threshold_withAttnScore = 0.5
         self.best_threshold_withStuPred = 0.5
+        self.epoch_warmup = epoch_warmup
     def optimize(self):
         best_combined_metric = float('inf')
         best_auc = 0
@@ -73,25 +74,25 @@ class Optimizer:
             else:
                 combined_metric = (1-bag_auc_ByTeacher_withAttnScore)
             
-        
-            if combined_metric < best_combined_metric:
-                best_combined_metric = combined_metric
-                best_model_wts_teacher = copy.deepcopy(self.model_teacher.state_dict())
-                best_model_wts_student = copy.deepcopy(self.model_student.state_dict())
-                best_model_wts_encoder = copy.deepcopy(self.model_encoder.state_dict())
-                loss_test, test_auc, test_f1macro_withAttn, test_accuracy = self.evaluate_teacher(epoch, test=True)
-                self.writer.add_scalar('Test/Loss', loss_test, epoch)
-                self.writer.add_scalar('Test/AUC', test_auc, epoch)
-                self.writer.add_scalar('Test/F1-Macro', test_f1macro_withAttn, epoch)
-                self.writer.add_scalar('Test/Accuracy', test_accuracy, epoch)
-                
-                
-                no_improvement = 0
-            else:
-                no_improvement += 1
-                if no_improvement >= self.patience:
-                    print(colored(f'Early stopping at epoch {epoch}',"red"))
-                    break
+            if epoch > self.epoch_warmup:
+                if combined_metric < best_combined_metric:
+                    best_combined_metric = combined_metric
+                    best_model_wts_teacher = copy.deepcopy(self.model_teacher.state_dict())
+                    best_model_wts_student = copy.deepcopy(self.model_student.state_dict())
+                    best_model_wts_encoder = copy.deepcopy(self.model_encoder.state_dict())
+                    loss_test, test_auc, test_f1macro_withAttn, test_accuracy = self.evaluate_teacher(epoch, test=True)
+                    self.writer.add_scalar('Test/Loss', loss_test, epoch)
+                    self.writer.add_scalar('Test/AUC', test_auc, epoch)
+                    self.writer.add_scalar('Test/F1-Macro', test_f1macro_withAttn, epoch)
+                    self.writer.add_scalar('Test/Accuracy', test_accuracy, epoch)
+                    
+                    
+                    no_improvement = 0
+                else:
+                    no_improvement += 1
+                    if no_improvement >= self.patience:
+                        print(colored(f'Early stopping at epoch {epoch}',"red"))
+                        break
         self.model_teacher.load_state_dict(best_model_wts_teacher)
         self.model_encoder.load_state_dict(best_model_wts_encoder)
         self.model_student.load_state_dict(best_model_wts_student)

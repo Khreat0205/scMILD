@@ -4,18 +4,18 @@ import os
 import torch
 
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
 import argparse
 import json
 import random
+import copy
 from utils import *
 from dataset import *
 from model import *
 from tqdm import tqdm as tdqm
 import time
 
-ae_prototypes = 3
 ae_learning_rate = 1e-3
 ae_epochs = 250
 ae_patience = 15
@@ -34,7 +34,7 @@ hyperparameters_dict = {
 
 
 # dir_path="lupus/disease"
-base_path = f"data/Lupus"
+base_path = f"data/UC"
 target_dir = f'{base_path}/AE/'
 if not os.path.exists(target_dir):
     os.makedirs(target_dir, exist_ok=False)
@@ -44,20 +44,9 @@ if not os.path.exists(hyperparameter_file_path):
     with open(hyperparameter_file_path, 'w') as file:
         json.dump(hyperparameters_dict, file, indent=4)
         
-device_num = 5
+device_num = 4
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
-
-
-# def load_dataset_and_preprocessors(base_path, exp, device):
-#     train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-#     val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-#     test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    
-#     with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
-#         label_encoder = pickle.load(f)
-
-#     return train_dataset, val_dataset, test_dataset, label_encoder
 
 
 def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
@@ -141,6 +130,7 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     for epoch in range(n_epochs):
         print('epoch: \t{0}'.format(epoch))
         train_recon = train(model=ae, dataloader=train_dl,optimizer=optimizer, device=device)
+        # train_recon_addition = train(model=ae, dataloader=train_dl_addition,optimizer=optimizer, device=device)
         print('\n')
         val_recon = test(model=ae, dataloader=val_dl, device=device)
         avg_val_loss = val_recon
@@ -163,8 +153,8 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
 
 for exp in tdqm(range(1,9),  desc="Experiment"):
     ################################## Load Dataset - Instance ###############
-    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp,device)
-
+    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
+    
     train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
     val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
@@ -179,16 +169,17 @@ for exp in tdqm(range(1,9),  desc="Experiment"):
     torch.cuda.manual_seed_all(exp)
     
     ################################## Set Encoding Model ####################
-    ae = AENB(input_dim=3000, latent_dim=ae_latent_dim, 
+    ## UC, 2000 HVGs
+    ae = AENB(input_dim=2000, latent_dim=ae_latent_dim, 
                         device=device, hidden_layers=ae_hidden_layers, 
                         activation_function=nn.Sigmoid).to(device)
 
     ae_optimizer = torch.optim.Adam(ae.parameters(), lr= ae_learning_rate)
     ################################## Training VAE ####################
-    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb8_{exp}.pth")
+    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb_{exp}.pth")
 
 
-    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb8_test.csv")
+    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb_test.csv")
     
     del train_dl, val_dl, test_dl, ae, ae_optimizer, test_recon
     torch.cuda.empty_cache()

@@ -14,10 +14,10 @@ from optimizer import *
 
 from torch.utils.tensorboard import SummaryWriter
 # from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curve, auc
-base_path = 'data/NS'
+base_path = 'data/UC'
 ae_dir = f'{base_path}/AE/'
 
-device_num = 3
+device_num = 4
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
 
@@ -53,23 +53,25 @@ for exp in range(1, 9):
     random.seed(exp)
     torch.cuda.manual_seed_all(exp)
 
-    vae_batch_size = 512
+    vae_batch_size = 256
     instance_train_dl = DataLoader(instance_train_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
     instance_val_dl = DataLoader(instance_val_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
     instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(vae_batch_size/2), shuffle=False, drop_last=False)
-
+    del instance_train_dataset, instance_val_dataset, instance_test_dataset
+    
     bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
     bag_val = MilDataset(val_dataset.data.to(device), val_dataset.ids.unsqueeze(0).to(device), val_dataset.labels.to(device), val_dataset.instance_labels.to(device))
     bag_test = MilDataset(test_dataset.data.to(device), test_dataset.ids.unsqueeze(0).to(device), test_dataset.labels.to(device), test_dataset.instance_labels.to(device))
-
+    del train_dataset, val_dataset, test_dataset
+    
     bag_train_dl = DataLoader(bag_train,batch_size = 14, shuffle=False, drop_last=False,collate_fn=collate)
     bag_val_dl = DataLoader(bag_val,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
     bag_test_dl = DataLoader(bag_test,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
-
+    del bag_train, bag_val, bag_test
 
     
 
-    ae = AENB(input_dim=3000, latent_dim=ae_latent_dim, 
+    ae = AENB(input_dim=2000, latent_dim=ae_latent_dim, 
                             device=device, hidden_layers=ae_hidden_layers, 
                             activation_function=nn.Sigmoid).to(device)
     ae.load_state_dict(torch.load(f"{ae_dir}/aenb_{exp}.pth"))
@@ -96,7 +98,7 @@ for exp in range(1, 9):
     # model_encoder.to(device)
     model_teacher.to(device)
     model_student.to(device)
-    teacher_learning_rate = 1e-4
+    teacher_learning_rate = 1e-3
     student_learning_rate = 1e-3
     encoder_learning_rate = 1e-3
     optimizer_teacher = torch.optim.Adam(model_teacher.parameters(), lr=teacher_learning_rate)
@@ -105,14 +107,14 @@ for exp in range(1, 9):
 
     optimizer_encoder = torch.optim.Adam(model_encoder.parameters(), lr=encoder_learning_rate)
     ### 지금 이 아래 세팅이 best model 
-    scMILD_epoch = 500
+    scMILD_epoch = 100
     scMILD_neg_weight = 0.3
     scMILD_stuOpt = 3
-    scMILD_patience = 45
+    scMILD_patience = 15
     add_suffix = "reported"
-    exp_writer = SummaryWriter(f'runs/NS')
+    exp_writer = SummaryWriter(f'runs/UC')
     #default patience = 15 
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
-                              patience=scMILD_patience, csv=f'results/NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',epoch_warmup=-1)
+                              patience=scMILD_patience, csv=f'results/UC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_UC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}')
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))

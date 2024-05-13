@@ -4,7 +4,7 @@ import os
 import torch
 
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 import numpy as np
 import argparse
 import json
@@ -44,35 +44,9 @@ if not os.path.exists(hyperparameter_file_path):
     with open(hyperparameter_file_path, 'w') as file:
         json.dump(hyperparameters_dict, file, indent=4)
         
-device_num = 5
+device_num = 4
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
-
-
-# def load_dataset_and_preprocessors(base_path, exp, device):
-#     train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-#     val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-#     test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    
-#     with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
-#         label_encoder = pickle.load(f)
-
-#     return train_dataset, val_dataset, test_dataset, label_encoder
-
-
-
-origin_path = '/home/local/kyeonghunjeong_920205/nipa_bu/COVID19/3.analysis/9.MIL/ProtoCell4P-main/data/covid'
-def load_dataset_and_preprocessors(base_path, exp):
-    train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt")
-    val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt")
-    test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt")
-    
-    with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt_only2.pkl", 'rb') as f:
-        label_encoder = pickle.load(f)
-    # with open(f"{base_path}/scaler_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
-    #     scaler = pickle.load(f)
-
-    return train_dataset, val_dataset, test_dataset, label_encoder# , scaler
 
 
 def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
@@ -156,6 +130,7 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     for epoch in range(n_epochs):
         print('epoch: \t{0}'.format(epoch))
         train_recon = train(model=ae, dataloader=train_dl,optimizer=optimizer, device=device)
+        # train_recon_addition = train(model=ae, dataloader=train_dl_addition,optimizer=optimizer, device=device)
         print('\n')
         val_recon = test(model=ae, dataloader=val_dl, device=device)
         avg_val_loss = val_recon
@@ -178,8 +153,9 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
 
 for exp in tdqm(range(1,9),  desc="Experiment"):
     ################################## Load Dataset - Instance ###############
-    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(origin_path, exp)
-
+    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
+    train_dataset_addition = torch.load(f"{base_path}/autoencoder_addition_train_dataset_exp{exp}.pt", map_location=device) ## NS-specific process
+    train_dataset = ConcatDataset([train_dataset,train_dataset_addition]) ## NS-specific process
     train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
     val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)

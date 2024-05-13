@@ -1,0 +1,12 @@
+{
+    "ae_learning_rate": 0.001,
+    "ae_epochs": 250,
+    "ae_patience": 15,
+    "ae_latent_dim": 128,
+    "ae_hidden_layers": [
+        512,
+        256,
+        128
+    ],
+    "ae_batch_size": 128
+}
