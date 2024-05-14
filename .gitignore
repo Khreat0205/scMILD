@@ -10,3 +10,6 @@
 *.pth
 *.csv
 events.out.tfevents.*
+.Rproj.user
+*.png
+*.pdf
