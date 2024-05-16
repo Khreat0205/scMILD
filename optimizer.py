@@ -49,7 +49,8 @@ class Optimizer:
         self.best_threshold_withStuPred = 0.5
         self.epoch_warmup = epoch_warmup
     def optimize(self):
-        best_combined_metric = float('inf')
+        # best_combined_metric = float('inf')
+        best_combined_metric = 0
         best_auc = 0
         best_model_wts_teacher = None
         best_model_wts_encoder = None
@@ -70,12 +71,12 @@ class Optimizer:
                 self.optimize_student(epoch)
             
             if self.val_combined_metric:
-                combined_metric = (1-bag_auc_ByTeacher_withAttnScore) + loss_val
+                combined_metric = bag_auc_ByTeacher_withAttnScore - loss_val
             else:
-                combined_metric = (1-bag_auc_ByTeacher_withAttnScore)
+                combined_metric = bag_auc_ByTeacher_withAttnScore
             
             if epoch > self.epoch_warmup:
-                if combined_metric < best_combined_metric:
+                if combined_metric > best_combined_metric:
                     best_combined_metric = combined_metric
                     best_model_wts_teacher = copy.deepcopy(self.model_teacher.state_dict())
                     best_model_wts_student = copy.deepcopy(self.model_student.state_dict())
