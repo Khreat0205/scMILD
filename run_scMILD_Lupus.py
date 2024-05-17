@@ -38,7 +38,7 @@ ae_hidden_layers = loaded_args.ae_hidden_layers
 ae_batch_size = loaded_args.ae_batch_size
 
 
-for exp in range(1, 7):
+for exp in range(8, 9):
     print(f'Experiment {exp}')
     train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
 
@@ -46,19 +46,23 @@ for exp in range(1, 7):
     instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
     instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
     
+    set_random_seed(exp)
     vae_batch_size = 512
     instance_train_dl = DataLoader(instance_train_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
     instance_val_dl = DataLoader(instance_val_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
     instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(vae_batch_size/2), shuffle=False, drop_last=False)
-
+    
+    del instance_train_dataset, instance_val_dataset, instance_test_dataset
     bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
     bag_val = MilDataset(val_dataset.data.to(device), val_dataset.ids.unsqueeze(0).to(device), val_dataset.labels.to(device), val_dataset.instance_labels.to(device))
     bag_test = MilDataset(test_dataset.data.to(device), test_dataset.ids.unsqueeze(0).to(device), test_dataset.labels.to(device), test_dataset.instance_labels.to(device))
+    del train_dataset, val_dataset, test_dataset
 
     bag_train_dl = DataLoader(bag_train,batch_size = 7, shuffle=False, drop_last=False,collate_fn=collate)
     bag_val_dl = DataLoader(bag_val,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
     bag_test_dl = DataLoader(bag_test,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
-
+    del bag_train, bag_val, bag_test
+    print("loaded all dataset")
 
     
 
@@ -67,7 +71,6 @@ for exp in range(1, 7):
                             activation_function=nn.Sigmoid).to(device)
     ae.load_state_dict(torch.load(f"{ae_dir}/aenb_{exp}.pth"))
     
-    set_random_seed(exp)
     mil_latent_dim = 64
     encoder_dim = ae_latent_dim
     model_encoder = ae.features
@@ -80,7 +83,7 @@ for exp in range(1, 7):
     model_student = StudentBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, num_classes=2, activation_function=nn.Tanh)
      
     
-    # model_encoder.to(device)
+    
     model_teacher.to(device)
     model_student.to(device)
     teacher_learning_rate = 1e-4
@@ -94,9 +97,9 @@ for exp in range(1, 7):
     ### 지금 이 아래 세팅이 best model 
     scMILD_epoch = 500
     scMILD_neg_weight = 0.1
-    scMILD_stuOpt = 3
+    scMILD_stuOpt = 5
     scMILD_patience = 15
-    add_suffix = "reported_batch7"
+    add_suffix = "reported_sbatch512_tbatch7"
     exp_writer = SummaryWriter(f'runs/Lupus')
     #default patience = 15 
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=True, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,

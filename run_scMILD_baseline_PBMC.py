@@ -95,14 +95,14 @@ for exp in range(1, 9):
     optimizer_encoder = torch.optim.Adam(model_encoder.parameters(), lr=encoder_learning_rate)
     scMILD_epoch = 500
     scMILD_neg_weight = 0.1
-    scMILD_stuOpt = 5
+    scMILD_stuOpt = 500
     scMILD_patience = 15
-    add_suffix = "reported"
+    add_suffix = "baseline"
     exp_writer = SummaryWriter(f'runs/PBMC')
     #default patience = 15 
     
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
-                              patience=scMILD_patience, csv=f'results/PBMC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_PBMC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}')
+                              patience=scMILD_patience, csv=f'results/PBMC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_PBMC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',train_stud=False)
     print("running scMILD")
     test_optimizer.optimize()
     

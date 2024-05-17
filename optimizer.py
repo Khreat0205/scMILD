@@ -14,7 +14,7 @@ from sklearn.metrics import roc_auc_score, accuracy_score, precision_recall_curv
 class Optimizer:
     def __init__(self, exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student,
                 optimizer_encoder,bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,
-                n_epochs, device, val_combined_metric=True, stuOptPeriod=3, stu_loss_weight_neg = 0.3, writer=None, patience=15, csv='tmp.csv', saved_path=None, epoch_warmup=0):
+                n_epochs, device, val_combined_metric=True, stuOptPeriod=3, stu_loss_weight_neg = 0.3, writer=None, patience=15, csv='tmp.csv', saved_path=None, epoch_warmup=0, train_stud = True):
         self.model_teacher = model_teacher
         self.model_student = model_student
         self.model_encoder = model_encoder
@@ -46,12 +46,11 @@ class Optimizer:
         self.saved_path = saved_path
         
         self.best_threshold_withAttnScore = 0.5
-        self.best_threshold_withStuPred = 0.5
         self.epoch_warmup = epoch_warmup
+        self.train_stud = train_stud
     def optimize(self):
-        # best_combined_metric = float('inf')
-        best_combined_metric = 0
-        best_auc = 0
+        best_combined_metric = float('inf')
+        # best_combined_metric = 0
         best_model_wts_teacher = None
         best_model_wts_encoder = None
         best_model_wts_student = None
@@ -67,25 +66,25 @@ class Optimizer:
             self.writer.add_scalar('Val/F1-Macro', bag_f1macro_ByTeacher_withAttnScore, epoch)
             self.writer.add_scalar('Val/Accuracy', bag_accuracy_ByTeacher_withAttnScore, epoch)
             
-            if epoch % self.stuOptPeriod == 0:
+            if epoch % self.stuOptPeriod == 0 and self.train_stud:
                 self.optimize_student(epoch)
             
             if self.val_combined_metric:
-                combined_metric = bag_auc_ByTeacher_withAttnScore - loss_val
+                combined_metric = (1-bag_auc_ByTeacher_withAttnScore) + loss_val
             else:
-                combined_metric = bag_auc_ByTeacher_withAttnScore
+                combined_metric = (1-bag_auc_ByTeacher_withAttnScore)
             
             if epoch > self.epoch_warmup:
-                if combined_metric > best_combined_metric:
+                if combined_metric < best_combined_metric:
                     best_combined_metric = combined_metric
                     best_model_wts_teacher = copy.deepcopy(self.model_teacher.state_dict())
                     best_model_wts_student = copy.deepcopy(self.model_student.state_dict())
                     best_model_wts_encoder = copy.deepcopy(self.model_encoder.state_dict())
-                    loss_test, test_auc, test_f1macro_withAttn, test_accuracy = self.evaluate_teacher(epoch, test=True)
-                    self.writer.add_scalar('Test/Loss', loss_test, epoch)
-                    self.writer.add_scalar('Test/AUC', test_auc, epoch)
-                    self.writer.add_scalar('Test/F1-Macro', test_f1macro_withAttn, epoch)
-                    self.writer.add_scalar('Test/Accuracy', test_accuracy, epoch)
+                    # loss_test, test_auc, test_f1macro_withAttn, test_accuracy = self.evaluate_teacher(epoch, test=True)
+                    # self.writer.add_scalar('Test/Loss', loss_test, epoch)
+                    # self.writer.add_scalar('Test/AUC', test_auc, epoch)
+                    # self.writer.add_scalar('Test/F1-Macro', test_f1macro_withAttn, epoch)
+                    # self.writer.add_scalar('Test/Accuracy', test_accuracy, epoch)
                     
                     
                     no_improvement = 0
@@ -210,9 +209,9 @@ class Optimizer:
             self.optimizer_encoder.step()
             self.optimizer_student.step()
             
-            instance_label_gt[iter*t_data.shape[0]:(iter+1)*t_data.shape[0]] = t_instance_labels
-            instance_label_pred[iter*t_data.shape[0]:(iter+1)*t_data.shape[0]] = instance_prediction[:, 1]
-            instance_corresponding_bag_idx[iter*t_data.shape[0]:(iter+1)*t_data.shape[0]] = t_bag_ids
+            # instance_label_gt[iter*t_data.shape[0]:(iter+1)*t_data.shape[0]] = t_instance_labels
+            # instance_label_pred[iter*t_data.shape[0]:(iter+1)*t_data.shape[0]] = instance_prediction[:, 1]
+            # instance_corresponding_bag_idx[iter*t_data.shape[0]:(iter+1)*t_data.shape[0]] = t_bag_ids
         
         return 0
     def best_threshold(self, precision, recall, thresholds):

@@ -13,3 +13,5 @@ events.out.tfevents.*
 .Rproj.user
 *.png
 *.pdf
+*.rds
+*.RDS

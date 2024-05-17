@@ -76,24 +76,15 @@ for exp in range(1, 9):
     
 
     mil_latent_dim = 64
-    # mil_learning_rate = 1e-3
-    # mode 1
-    # attention_module = AttentionModule(L=vae_latent_dim, D=vae_latent_dim //4 , K=1).to(device)
-    # mode 2
     encoder_dim = ae_latent_dim
     model_encoder = ae.features
-    # encoder_dim = 64
-    # model_encoder = EncoderBranch(proto_vae, encoder_dim, activation_function=nn.LeakyReLU).to(device)
     attention_module = AttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
-    # attention_module = GatedAttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
 
     model_teacher = TeacherBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, 
                             attention_module=attention_module, num_classes=2, activation_function=nn.Tanh)
 
     model_student = StudentBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, num_classes=2, activation_function=nn.Tanh)
-     
     
-    # model_encoder.to(device)
     model_teacher.to(device)
     model_student.to(device)
     teacher_learning_rate = 1e-4
@@ -107,12 +98,12 @@ for exp in range(1, 9):
     ### 지금 이 아래 세팅이 best model 
     scMILD_epoch = 500
     scMILD_neg_weight = 0.3
-    scMILD_stuOpt = 3
-    scMILD_patience = 15
-    add_suffix = "reported"
+    scMILD_stuOpt = 500
+    scMILD_patience = 45
+    add_suffix = "baseline"
     exp_writer = SummaryWriter(f'runs/NS')
     #default patience = 15 
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
-                              patience=scMILD_patience, csv=f'results/NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',epoch_warmup=0)
+                              patience=scMILD_patience, csv=f'results/NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',epoch_warmup=-1, train_stud=False)
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
