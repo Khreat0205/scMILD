@@ -116,3 +116,5 @@ for exp in range(1, 9):
                               patience=scMILD_patience, csv=f'results/NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',epoch_warmup=-1)
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
+    torch.cuda.empty_cache()
+    del test_optimizer, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl, exp_writer

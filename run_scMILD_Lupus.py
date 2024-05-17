@@ -18,7 +18,7 @@ dataset = "Lupus"
 base_path = f'data/{dataset}'
 ae_dir = f'{base_path}/AE/'
 
-device_num = 3
+device_num = 5
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
 
@@ -75,7 +75,6 @@ for exp in range(8, 9):
     encoder_dim = ae_latent_dim
     model_encoder = ae.features
     attention_module = AttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
-    # attention_module = GatedAttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
 
     model_teacher = TeacherBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, 
                             attention_module=attention_module, num_classes=2, activation_function=nn.Tanh)
@@ -107,3 +106,4 @@ for exp in range(8, 9):
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
     torch.cuda.empty_cache()
+    del test_optimizer, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl, exp_writer

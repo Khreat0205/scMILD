@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 base_path = 'data/NS'
 ae_dir = f'{base_path}/AE/'
 
-device_num = 3
+device_num = 5
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
 
@@ -45,26 +45,21 @@ for exp in range(1, 9):
     instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
     instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
     
-    torch.manual_seed(exp)
-    torch.cuda.manual_seed(exp)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(exp)
-    random.seed(exp)
-    torch.cuda.manual_seed_all(exp)
+    set_random_seed(exp)
 
     vae_batch_size = 512
     instance_train_dl = DataLoader(instance_train_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
     instance_val_dl = DataLoader(instance_val_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
     instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(vae_batch_size/2), shuffle=False, drop_last=False)
-
+    del instance_train_dataset, instance_val_dataset, instance_test_dataset
     bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
     bag_val = MilDataset(val_dataset.data.to(device), val_dataset.ids.unsqueeze(0).to(device), val_dataset.labels.to(device), val_dataset.instance_labels.to(device))
     bag_test = MilDataset(test_dataset.data.to(device), test_dataset.ids.unsqueeze(0).to(device), test_dataset.labels.to(device), test_dataset.instance_labels.to(device))
-
+    del train_dataset, val_dataset, test_dataset
     bag_train_dl = DataLoader(bag_train,batch_size = 14, shuffle=False, drop_last=False,collate_fn=collate)
     bag_val_dl = DataLoader(bag_val,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
     bag_test_dl = DataLoader(bag_test,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
+    del bag_train, bag_val, bag_test
 
 
     
@@ -100,10 +95,12 @@ for exp in range(1, 9):
     scMILD_neg_weight = 0.3
     scMILD_stuOpt = 500
     scMILD_patience = 45
-    add_suffix = "baseline"
+    add_suffix = "baseline2"
     exp_writer = SummaryWriter(f'runs/NS')
     #default patience = 15 
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
                               patience=scMILD_patience, csv=f'results/NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_NS_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',epoch_warmup=-1, train_stud=False)
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
+    torch.cuda.empty_cache()
+    del test_optimizer, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl, exp_writer

@@ -4,7 +4,7 @@ library(ggpubr)
 library(patchwork)
 library(data.table)
 library(SeuratObject)
-
+setwd("/home/local/kyeonghunjeong_920205/nipa_bu/COVID19/3.analysis/9.MIL/scAMIL_cell/scMILD/downstream/")
 whole_obs = fread("NS/whole_obs.csv")
 Convert("NS/anndata_2.h5ad", dest = "h5seurat", overwrite = T) ## mean performance
 test_obj = LoadH5Seurat("NS/anndata_2.h5seurat", meta.data=F)
@@ -158,8 +158,11 @@ p_dev_cil_top35= DotPlot(subset(test_obj,idents = "Developing Ciliated Cells" ),
 p_dev_cil_top35
 ggsave(plot =p_dev_cil_top35 ,filename =  file.path(res_dir,"Dot_DEG35_Dev_Ciliated.pdf"),device = 'pdf',width=14, height=4,dpi = 450)
 positive_markers_devcil
-fwrite(positive_markers_devcil,file = file.path(res_dir,"Table_DEG_DevelopingCiliated.csv"),sep=",")
-fwrite(positive_markers_scrt,file = file.path(res_dir,"Table_DEG_Secretory.csv"),sep=",")
+dag_markers_cil
+fwrite(disease_markers_cil,file = file.path(res_dir,"Table_DEG_Ciliated_phenotype.csv"),sep=",",row.names = T)
+fwrite(dag_markers_cil,file = file.path(res_dir,"Table_DEG_Ciliated_model_guided.csv"),sep=",",row.names = T)
+fwrite(positive_markers_devcil,file = file.path(res_dir,"Table_DEG_DevelopingCiliated.csv"),sep=",",row.names = T)
+fwrite(positive_markers_scrt,file = file.path(res_dir,"Table_DEG_Secretory.csv"),sep=",",row.names = T)
 
 intersect_cil = intersect(rownames(dag_markers_cil)[1:100], rownames(disease_markers_cil)[1:100])
 setdiff_positive_cil = setdiff(rownames(dag_markers_cil)[1:100], rownames(disease_markers_cil)[1:100])

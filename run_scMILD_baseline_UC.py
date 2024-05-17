@@ -111,10 +111,12 @@ for exp in range(1, 9):
     scMILD_neg_weight = 0.3
     scMILD_stuOpt = 100
     scMILD_patience = 15
-    add_suffix = "baseline"
+    add_suffix = "baseline2"
     exp_writer = SummaryWriter(f'runs/UC')
     #default patience = 15 
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
                               patience=scMILD_patience, csv=f'results/UC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_UC_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}',train_stud=False)
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
+    torch.cuda.empty_cache()
+    del test_optimizer, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl, exp_writer

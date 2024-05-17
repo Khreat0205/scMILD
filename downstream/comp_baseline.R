@@ -4,57 +4,58 @@ rm(list=ls())
 gc()
 getwd()
 setwd("../../")
+# setwd("/home/local/kyeonghunjeong_920205/nipa_bu/COVID19/3.analysis/9.MIL/scAMIL_cell/scMILD/downstream/")
 getwd()
 ### baseline 
-dir_lupus_baseline = "scAMIL_cell/NO_Opt_student_WENO_lupus_disease_model_vae_ed128_md64_lr0.0001_500_0.1_500_15_NO_Opt_student_leaktantan_fix_auc433_noflt_EarlyStopLogic_aebatch128_reduceLayer/"
-dir_ns_baseline = "scAMIL_cell/NO_Opt_student_WENO_covid_model_vae_ed128_md64_lr0.0001_500_0.3_500_15_NO_Opt_student_leaktantan_fix_auc433_noflt_only2"
+# dir_lupus_baseline = "scAMIL_cell/NO_Opt_student_WENO_lupus_disease_model_vae_ed128_md64_lr0.0001_500_0.1_500_15_NO_Opt_student_leaktantan_fix_auc433_noflt_EarlyStopLogic_aebatch128_reduceLayer/"
+dir_lupus_baseline = "scAMIL_cell/scMILD/downstream/Lupus/"
+# dir_ns_baseline = "scAMIL_cell/NO_Opt_student_WENO_covid_model_vae_ed128_md64_lr0.0001_500_0.3_500_15_NO_Opt_student_leaktantan_fix_auc433_noflt_only2"
 dir_ns_baseline = "scAMIL_cell/scMILD/downstream/NS/"
-dir_pbmc_baseline = "scAMIL_cell/NO_Opt_student_WENO_su_2020_model_vae_ed128_md64_lr0.0001_500_0.1_500_15_NO_Opt_student_leaktantan_fix_auc4054054_noflt_only2/"
-dir_uc_baseline = "scAMIL_cell/NO_Opt_student_WENO_UC_model_ae_ed128_md64_lr0.001_100_0.3_100_15_NO_Opt_student_leaktantan_fix_auc333_noflt_only2B/"
+dir_pbmc_baseline = "scAMIL_cell/scMILD/downstream/PBMC/"
+# dir_uc_baseline = "scAMIL_cell/NO_Opt_student_WENO_UC_model_ae_ed128_md64_lr0.001_100_0.3_100_15_NO_Opt_student_leaktantan_fix_auc333_noflt_only2B/"
 dir_uc_baseline = "scAMIL_cell/scMILD/downstream/UC/"
 
 ### scMILD
-dir_lupus_scmild = "scAMIL_cell/WENO_lupus_disease_model_vae_ed128_md64_lr0.0001_500_0.1_3_15_leaktantan_fix_auc433_noflt_EarlyStopLogic_batch7"
-dir_ns_scmild = dir_ns_baseline = "scAMIL_cell/scMILD/downstream/NS/"
-dir_pbmc_scmild = "scAMIL_cell/WENO_su_2020_model_vae_ed128_md64_lr0.0001_500_0.1_5_15_leaktantan_fix_auc433_noflt_only2"
-dir_uc_scmild = "scAMIL_cell/WENO_UC_model_ae_ed128_md64_lr0.001_100_0.3_3_15_leaktantan_fix_auc333_noflt_only2"
-dir_uc_scmild = "scAMIL_cell/scMILD/downstream/UC/"
+dir_lupus_scmild = "Lupus/"
+dir_ns_scmild = dir_ns_baseline = "NS/"
+dir_pbmc_scmild = "PBMC/"
+dir_uc_scmild = "UC/"
 color_lupus = c("#2ECC40", "#9370DB") # Healthy, SLE
 color_ns = c("#0070C0","#FF4136") # Normal, COVID-19
 color_pbmc = c("#2ECC40","#FF4136") # Not-Hosp. , Hosp. 
 color_uc = c("#3D9970","#FF4136") # Healthy, Inflamed
 
 
-readABSCdat = function(dir_scmild,dir_baseline){
-  scmild_files = list.files(dir_scmild,full.names = T)
-  scmild_obs = scmild_files[grepl("/obs_[0-8].csv",scmild_files)]
-  obs_dat= rbindlist(lapply(scmild_obs, fread))
-  scmild_score = scmild_files[grepl("/cell_score_[0-9].csv",scmild_files)]
-  score_dat = rbindlist(lapply(scmild_score, function(x) {
-    y= fread(x)
-    y= y[,!grepl("feature",colnames(y)),with=F]
-    y$exp = gsub("cell_score_|.csv","",basename(x))
-    return(y)
-  }))
-  
-  baseline_files = list.files(dir_baseline,full.names = T)
-  baseline_score = baseline_files[grepl("/cell_score_[0-9].csv",baseline_files)]
-  score_dat_baseline = rbindlist(lapply(baseline_score, function(x) {
-    y= fread(x)
-    y= y[,!grepl("feature",colnames(y)),with=F]
-    return(y)
-    }
-                                     ))
-  colnames(score_dat_baseline) = paste0(colnames(score_dat_baseline),".baseline")
-  
-  dat = cbind(obs_dat,score_dat )
-  dat = cbind(dat,score_dat_baseline)
-  dat = dat[,!duplicated(colnames(dat)),with=F]
-  dat$bag_labels = as.factor(dat$bag_labels)
-  return(dat)
-}
+# readABSCdat = function(dir_scmild,dir_baseline){
+#   scmild_files = list.files(dir_scmild,full.names = T)
+#   scmild_obs = scmild_files[grepl("/obs_[0-8].csv",scmild_files)]
+#   obs_dat= rbindlist(lapply(scmild_obs, fread))
+#   scmild_score = scmild_files[grepl("/cell_score_[0-9].csv",scmild_files)]
+#   score_dat = rbindlist(lapply(scmild_score, function(x) {
+#     y= fread(x)
+#     y= y[,!grepl("feature",colnames(y)),with=F]
+#     y$exp = gsub("cell_score_|.csv","",basename(x))
+#     return(y)
+#   }))
+#   
+#   baseline_files = list.files(dir_baseline,full.names = T)
+#   baseline_score = baseline_files[grepl("/cell_score_[0-9].csv",baseline_files)]
+#   score_dat_baseline = rbindlist(lapply(baseline_score, function(x) {
+#     y= fread(x)
+#     y= y[,!grepl("feature",colnames(y)),with=F]
+#     return(y)
+#     }
+#                                      ))
+#   colnames(score_dat_baseline) = paste0(colnames(score_dat_baseline),".baseline")
+#   
+#   dat = cbind(obs_dat,score_dat )
+#   dat = cbind(dat,score_dat_baseline)
+#   dat = dat[,!duplicated(colnames(dat)),with=F]
+#   dat$bag_labels = as.factor(dat$bag_labels)
+#   return(dat)
+# }
 
-readABSCdat2 = function(dir_scmild,dir_baseline){
+readABSCdat = function(dir_scmild){
   scmild_files = list.files(dir_scmild,full.names = T)
   scmild_obs = scmild_files[grepl("/obs_[0-8].csv",scmild_files)]
   obs_dat= rbindlist(lapply(scmild_obs, fread))
@@ -66,7 +67,7 @@ readABSCdat2 = function(dir_scmild,dir_baseline){
     return(y)
   }))
   
-  baseline_files = list.files(dir_baseline,full.names = T)
+  baseline_files = list.files(dir_scmild,full.names = T)
   baseline_score = baseline_files[grepl("/cell_score_[0-9]_baseline.csv",baseline_files)]
   score_dat_baseline = rbindlist(lapply(baseline_score, function(x) {
     y= fread(x)
@@ -83,11 +84,10 @@ readABSCdat2 = function(dir_scmild,dir_baseline){
   return(dat)
 }
 
-ns_dat = readABSCdat2(dir_ns_scmild, dir_ns_baseline)
-ns_dat
-lupus_dat = readABSCdat(dir_lupus_scmild, dir_lupus_baseline)
-uc_dat = readABSCdat2(dir_uc_scmild, dir_uc_baseline)
-pbmc_dat = readABSCdat(dir_pbmc_scmild,dir_pbmc_baseline)
+ns_dat = readABSCdat(dir_ns_scmild)
+lupus_dat = readABSCdat(dir_lupus_scmild)
+uc_dat = readABSCdat(dir_uc_scmild)
+pbmc_dat = readABSCdat(dir_pbmc_scmild)
 
 
 library(patchwork)
@@ -104,7 +104,7 @@ vlnPlot_twoScore = function(dat, title, score1, score2, color, labels = c(0,1)){
   
   return(wrap_plots(p1+ggtitle(title),p2, nrow=1))
 }
-res_dir = c("scAMIL_cell/scMILD/downstream/attn_score")
+res_dir = c("attn_score")
 dir.create(res_dir)
 vln_ns = vlnPlot_twoScore(ns_dat,"COVID-19 NS", "cell_score_minmax", "cell_score_minmax.baseline", color_ns, c("Normal","COVID-19"))
 vln_lupus = vlnPlot_twoScore(lupus_dat, "Lupus","cell_score_minmax", "cell_score_minmax.baseline", color_lupus, c("Healthy","SLE"))
@@ -116,7 +116,7 @@ vln_collect_wide = ggarrange(plotlist= list(vln_lupus, vln_ns, vln_pbmc, vln_uc)
 
 ggexport(vln_collect, filename = paste0(res_dir,"/vlnPlot_twoScore.pdf"), content = "page")
 ggexport(vln_collect_wide, filename = paste0(res_dir,"/vlnPlot_twoScore_wide.pdf"), content = "page",width = 16,height=4)
-
+vln_collect_wide
 
 
 Cor_twoScore= function(dat, score1, score2){
@@ -296,54 +296,8 @@ KS_twoScore2 = function(dat){
 
 quantile(ns_dat$cell_score_minmax)
 quantile(ns_dat$cell_score_minmax.baseline)[4]
-KS_twoScore3 = function(dat){
-  ks1 = ks.test(dat[dat$bag_labels == "1" ,]$cell_score_minmax,
-                dat[dat$bag_labels == "0",]$cell_score_minmax)
-  
-  ks2 = ks.test(dat[dat$bag_labels == "1",]$cell_score_minmax.baseline,
-                dat[dat$bag_labels == "0",]$cell_score_minmax.baseline)
-  
-  
-  ks1b = ks.test(dat[dat$bag_labels == "1" & 
-                       dat$cell_score_minmax>quantile(dat$cell_score_minmax)[4],]$cell_score_minmax,
-                 dat[dat$bag_labels == "0"& 
-                       dat$cell_score_minmax>quantile(dat$cell_score_minmax)[4],]$cell_score_minmax)
-  
-  ks2b = ks.test(dat[dat$bag_labels == "1" & 
-                       dat$cell_score_minmax.baseline>quantile(dat$cell_score_minmax.baseline)[4],]$cell_score_minmax.baseline,
-                 dat[dat$bag_labels == "0"& 
-                       dat$cell_score_minmax.baseline>quantile(dat$cell_score_minmax.baseline)[4],]$cell_score_minmax.baseline)
-  ks1c = ks.test(dat[dat$bag_labels == "1" & 
-                       dat$cell_score_minmax<quantile(dat$cell_score_minmax)[2],]$cell_score_minmax,
-                 dat[dat$bag_labels == "0"& 
-                       dat$cell_score_minmax<quantile(dat$cell_score_minmax)[2],]$cell_score_minmax)
-  
-  ks2c = ks.test(dat[dat$bag_labels == "1" & 
-                       dat$cell_score_minmax.baseline<quantile(dat$cell_score_minmax.baseline)[2],]$cell_score_minmax.baseline,
-                 dat[dat$bag_labels == "0"& 
-                       dat$cell_score_minmax.baseline<quantile(dat$cell_score_minmax.baseline)[2],]$cell_score_minmax.baseline)
-  
-  return(c(scMILD.ks.all = ks1$statistic, scMILD.ks.all_p = ks1$p.value,
-           
-           baseline.ks.all = ks2$statistic, baseline.ks.all_p=ks2$p.value,
-           
-           scMILD.ks.gt.0.8 = ks1b$statistic, scMILD.ks.gt.0.8_p = ks1b$p.value,
-           
-           baseline.ks.gt.0.8= ks2b$statistic, baseline.ks.gt.0.8_p=ks2b$p.value,
-           
-           scMILD.ks.lt.0.2 = ks1c$statistic, scMILD.ks.lt.0.2_p = ks1c$p.value,
-           
-           baseline.ks.lt.0.2= ks2c$statistic, baseline.ks.lt.0.2_p=ks2c$p.value
-           
-  ))
-}
 
 ks_ns2 = KS_twoScore2(ns_dat)
-ks_ns3 = KS_twoScore3(ns_dat)
-ks_ns3
-ks_ns4 = KS_twoScore4(ns_dat)
-ks_ns3
-ks_ns
 ks_uc2 = KS_twoScore2(uc_dat)
 ks_pbmc2 = KS_twoScore2(pbmc_dat)
 ks_lupus2 = KS_twoScore2(lupus_dat)
@@ -353,108 +307,7 @@ write.csv(ks_res2, file.path(res_dir,"ks_results2.csv"))
 
 
 
-library(LDLcalc)
 
-
-# JS divergence
-JS_twoScore = function(dat){
-  js1 = LDLcalc::JSD(dat[dat$bag_labels == "1" ,]$cell_score_minmax,
-                dat[dat$bag_labels == "0",]$cell_score_minmax)
-  
-  js2 = LDLcalc::JSD(dat[dat$bag_labels == "1",]$cell_score_minmax.baseline,
-                dat[dat$bag_labels == "0",]$cell_score_minmax.baseline)
-  
-  
-  js1b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                    dat$cell_score_minmax>0.5,]$cell_score_minmax,
-                dat[dat$bag_labels == "0"& 
-                    dat$cell_score_minmax>0.5,]$cell_score_minmax)
-  
-  js2b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                    dat$cell_score_minmax.baseline>0.5,]$cell_score_minmax.baseline,
-                dat[dat$bag_labels == "0"& 
-                    dat$cell_score_minmax.baseline>0.5,]$cell_score_minmax.baseline)
-  js1c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                       dat$cell_score_minmax<0.5,]$cell_score_minmax,
-                 dat[dat$bag_labels == "0"& 
-                       dat$cell_score_minmax<0.5,]$cell_score_minmax)
-  
-  js2c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                       dat$cell_score_minmax.baseline<0.5,]$cell_score_minmax.baseline,
-                 dat[dat$bag_labels == "0"& 
-                       dat$cell_score_minmax.baseline<0.5,]$cell_score_minmax.baseline)
-  
-  return(c(scMILD.js.all = js1$JSD,
-           
-           baseline.js.all = js2$JSD,
-           
-           scMILD.js.gt.0.5 = js1b$JSD,
-           
-           baseline.js.gt.0.5= js2b$JSD,
-           
-           scMILD.js.lt.0.5 = js1c$JSD,
-           
-           baseline.js.lt.0.5= js2c$JSD))
-}
-
-js_lupus = JS_twoScore(lupus_dat)
-js_ns = JS_twoScore(ns_dat)
-js_pbmc = JS_twoScore(pbmc_dat)
-js_uc = JS_twoScore(uc_dat)
-js_res = rbind(Lupus=js_lupus, NS=js_ns, PBMC=js_pbmc, UC=js_uc)
-js_res
-
-write.csv(js_res,file.path(res_dir,"JS_divergence.csv"))
-
-
-JS_twoScore2 = function(dat){
-  js1 = LDLcalc::JSD(dat[dat$bag_labels == "1" ,]$cell_score_minmax,
-                     dat[dat$bag_labels == "0",]$cell_score_minmax)
-  
-  js2 = LDLcalc::JSD(dat[dat$bag_labels == "1",]$cell_score_minmax.baseline,
-                     dat[dat$bag_labels == "0",]$cell_score_minmax.baseline)
-  
-  
-  js1b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                            dat$cell_score_minmax>0.75,]$cell_score_minmax,
-                      dat[dat$bag_labels == "0"& 
-                            dat$cell_score_minmax>0.75,]$cell_score_minmax)
-  
-  js2b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                            dat$cell_score_minmax.baseline>0.75,]$cell_score_minmax.baseline,
-                      dat[dat$bag_labels == "0"& 
-                            dat$cell_score_minmax.baseline>0.75,]$cell_score_minmax.baseline)
-  js1c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                            dat$cell_score_minmax<0.25,]$cell_score_minmax,
-                      dat[dat$bag_labels == "0"& 
-                            dat$cell_score_minmax<0.25,]$cell_score_minmax)
-  
-  js2c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
-                            dat$cell_score_minmax.baseline<0.25,]$cell_score_minmax.baseline,
-                      dat[dat$bag_labels == "0"& 
-                            dat$cell_score_minmax.baseline<0.25,]$cell_score_minmax.baseline)
-  
-  return(c(scMILD.js.all = js1$JSD,
-           
-           baseline.js.all = js2$JSD,
-           
-           scMILD.js.gt.0.75 = js1b$JSD,
-           
-           baseline.js.gt.0.75= js2b$JSD,
-           
-           scMILD.js.lt.0.25 = js1c$JSD,
-           
-           baseline.js.lt.0.25= js2c$JSD))
-}
-
-js_lupus2 = JS_twoScore2(lupus_dat)
-js_ns2 = JS_twoScore2(ns_dat)
-js_pbmc2 = JS_twoScore2(pbmc_dat)
-js_uc2 = JS_twoScore2(uc_dat)
-js_res2 = rbind(Lupus=js_lupus2, NS=js_ns2, PBMC=js_pbmc2, UC=js_uc2)
-
-
-write.csv(js_res2,file.path(res_dir,"JS_divergence2.csv"))
 
 
 
@@ -574,7 +427,7 @@ ks_res2_tidy[,5]- ks_res2_tidy[,6]
 ov_res2[,3]- ov_res2[,4]
 ov_res2[,5]- ov_res2[,6]
 library(RColorBrewer)
-
+library(circlize)
 ov_col_fun = colorRamp2(c(0.8, 0.9, 1), rev(brewer.pal(3,"YlOrRd")))
 ov_col_fun = colorRampPalette(rev(brewer.pal(9, "YlOrRd")))(100)
 ks_col_fun = colorRamp2(c(0, 0.1, 0.2), brewer.pal(3,"BuGn"))
@@ -659,11 +512,11 @@ draw(ht_ov)
 dev.off()
 
 
-pdf(file.path(res_dir, "Heatmap_ks_statistics_wide.pdf"), width = 5, height = 4)
+pdf(file.path(res_dir, "Heatmap_ks_statistics_wide.pdf"), width = 7, height = 4)
 draw(ht_ks_wide)
 dev.off()
 
-pdf(file.path(res_dir, "Heatmap_overlap_coeff_wide.pdf"), width = 5, height = 4)
+pdf(file.path(res_dir, "Heatmap_overlap_coeff_wide.pdf"), width = 7, height = 4)
 draw(ht_ov_wide)
 dev.off()
 
@@ -676,23 +529,21 @@ js_res2[,3] - js_res2[,4]
 colnames(ks_res2)
 
 
-ks_res # KS statistics
-ov_res # Overlap coefficients
 
 
-
-gghistogram(ns_dat, x = "cell_score_minmax",fill="bag_labels",palette = color_ns,position="dodge",bins=100)+
+gghistogram(ns_dat, x = "cell_score_minmax",fill="bag_labels",palette = color_ns,position="dodge",bins=100,ylim=c(0,5000))+
   theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("scMILD")+ylab("Frequency")
-gghistogram(ns_dat, x = "cell_score_minmax.baseline",fill="bag_labels",palette = color_ns,position="dodge",bins=100)+
+gghistogram(ns_dat, x = "cell_score_minmax.baseline",fill="bag_labels",palette = color_ns,position="dodge",bins=100,ylim=c(0,5000))+
   theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("baseline")+ylab("Frequency")
 
 
 gghistogram(pbmc_dat, x = "cell_score_minmax",fill="bag_labels",palette = color_ns,position="dodge",bins=100)+
   theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("scMILD")+ylab("Frequency")
+gghistogram(pbmc_dat, x = "cell_score_minmax.baseline",fill="bag_labels",palette = color_ns,position="dodge",bins=100)+
+  theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("scMILD")+ylab("Frequency")
 
 ggdensity(pbmc_dat, x = "cell_score_minmax",fill="bag_labels",palette = color_ns)+
   theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("scMILD")+ylab("Density")
-?ggdensity
 ggdensity(pbmc_dat, x = "cell_score_minmax.baseline",fill="bag_labels",palette = color_ns)+
   theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("baseline")+ylab("Density")
 
@@ -704,162 +555,124 @@ gc()
 
 library(ggridges)
 
-ggplot(ns_dat,aes(x = cell_score_minmax.baseline, y=bag_labels,fill=bag_labels,
-                  ))+
-  geom_density_ridges()+scale_fill_manual(values = color_ns)
-ggplot(ns_dat,aes(x = cell_score_minmax, y=bag_labels,fill=bag_labels,
-))+
-  geom_density_ridges()+scale_fill_manual(values = color_ns)
-
-cor(ns_dat$cell_score_minmax,ns_dat$cell_score_minmax.baseline,method="spearman")
-
-
-
-p_pbmc_baseline = ggboxplot(pbmc_merged, y = "cell_score_teacher.baseline", 
-          x = "cell_type", fill="bag_labels",
-          outlier.shape = NA,palette = color_pbmc)+
-  theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("")+ylab("baseline")
-p_pbmc_scmild = ggboxplot(pbmc_merged, y = "cell_score_teacher", 
-          x = "cell_type",fill="bag_labels",
-          outlier.shape = NA,palette = color_pbmc)+
-  theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("")+ylab("scMILD")
-p_pbmc_baseline / p_pbmc_scmild
-pbmc_merged$cell_score_teacher
-pbmc_merged$delta_scores = pbmc_merged$cell_score_minmax - pbmc_merged$cell_score_minmax.baseline
-ggboxplot(pbmc_merged, y="delta_scores", x="cell_type",fill="bag_labels")
-
-
-
-
-ggpaired(pbmc_merged, cond1="cell_score_minmax.baseline", cond2= "cell_score_minmax")
-
-p_uc_baseline = ggboxplot(uc_merged, y = "cell_score_minmax.baseline", 
-          x = "cell_type", fill="bag_labels",
-          outlier.shape = NA,palette = color_uc)+
-  theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("")+ylab("baseline")
-p_uc_scmild = ggboxplot(uc_merged, y = "cell_score_minmax", 
-          x = "cell_type",fill="bag_labels",
-          outlier.shape = NA,palette = color_uc)+
-  theme(legend.position = "none",axis.text.x = element_text(angle = 45, hjust = 1))+xlab("")+ylab("scMILD")
-p_uc_baseline / p_uc_scmild
-
-
-
 
 library(patchwork)
-# library(PRROC)
-# install.packages("yardstick")
-library(yardstick)
-# library(pROC)
-# pROC::roc
-# install.packages("PRROC")
 
 
-uc_dat$cell_score_teacher
-ns_merged$bag_labels
-roc.curve(ns_merged$bag_labels, ns_merged$cell_score_minmax.baseline,curve=T)
-roc(ns_merged,bag_labels, cell_score_minmax.baseline)
-roc(ns_merged,bag_labels, cell_score_minmax)
+# library(LDLcalc)
+# # JS divergence
+# JS_twoScore = function(dat){
+#   js1 = LDLcalc::JSD(dat[dat$bag_labels == "1" ,]$cell_score_minmax,
+#                 dat[dat$bag_labels == "0",]$cell_score_minmax)
+#   
+#   js2 = LDLcalc::JSD(dat[dat$bag_labels == "1",]$cell_score_minmax.baseline,
+#                 dat[dat$bag_labels == "0",]$cell_score_minmax.baseline)
+#   
+#   
+#   js1b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                     dat$cell_score_minmax>0.5,]$cell_score_minmax,
+#                 dat[dat$bag_labels == "0"& 
+#                     dat$cell_score_minmax>0.5,]$cell_score_minmax)
+#   
+#   js2b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                     dat$cell_score_minmax.baseline>0.5,]$cell_score_minmax.baseline,
+#                 dat[dat$bag_labels == "0"& 
+#                     dat$cell_score_minmax.baseline>0.5,]$cell_score_minmax.baseline)
+#   js1c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                        dat$cell_score_minmax<0.5,]$cell_score_minmax,
+#                  dat[dat$bag_labels == "0"& 
+#                        dat$cell_score_minmax<0.5,]$cell_score_minmax)
+#   
+#   js2c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                        dat$cell_score_minmax.baseline<0.5,]$cell_score_minmax.baseline,
+#                  dat[dat$bag_labels == "0"& 
+#                        dat$cell_score_minmax.baseline<0.5,]$cell_score_minmax.baseline)
+#   
+#   return(c(scMILD.js.all = js1$JSD,
+#            
+#            baseline.js.all = js2$JSD,
+#            
+#            scMILD.js.gt.0.5 = js1b$JSD,
+#            
+#            baseline.js.gt.0.5= js2b$JSD,
+#            
+#            scMILD.js.lt.0.5 = js1c$JSD,
+#            
+#            baseline.js.lt.0.5= js2c$JSD))
+# }
+# 
+# js_lupus = JS_twoScore(lupus_dat)
+# js_ns = JS_twoScore(ns_dat)
+# js_pbmc = JS_twoScore(pbmc_dat)
+# js_uc = JS_twoScore(uc_dat)
+# js_res = rbind(Lupus=js_lupus, NS=js_ns, PBMC=js_pbmc, UC=js_uc)
+# js_res
+# 
+# write.csv(js_res,file.path(res_dir,"JS_divergence.csv"))
+# 
+# 
+# JS_twoScore2 = function(dat){
+#   js1 = LDLcalc::JSD(dat[dat$bag_labels == "1" ,]$cell_score_minmax,
+#                      dat[dat$bag_labels == "0",]$cell_score_minmax)
+#   
+#   js2 = LDLcalc::JSD(dat[dat$bag_labels == "1",]$cell_score_minmax.baseline,
+#                      dat[dat$bag_labels == "0",]$cell_score_minmax.baseline)
+#   
+#   
+#   js1b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                             dat$cell_score_minmax>0.75,]$cell_score_minmax,
+#                       dat[dat$bag_labels == "0"& 
+#                             dat$cell_score_minmax>0.75,]$cell_score_minmax)
+#   
+#   js2b = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                             dat$cell_score_minmax.baseline>0.75,]$cell_score_minmax.baseline,
+#                       dat[dat$bag_labels == "0"& 
+#                             dat$cell_score_minmax.baseline>0.75,]$cell_score_minmax.baseline)
+#   js1c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                             dat$cell_score_minmax<0.25,]$cell_score_minmax,
+#                       dat[dat$bag_labels == "0"& 
+#                             dat$cell_score_minmax<0.25,]$cell_score_minmax)
+#   
+#   js2c = LDLcalc::JSD(dat[dat$bag_labels == "1" & 
+#                             dat$cell_score_minmax.baseline<0.25,]$cell_score_minmax.baseline,
+#                       dat[dat$bag_labels == "0"& 
+#                             dat$cell_score_minmax.baseline<0.25,]$cell_score_minmax.baseline)
+#   
+#   return(c(scMILD.js.all = js1$JSD,
+#            
+#            baseline.js.all = js2$JSD,
+#            
+#            scMILD.js.gt.0.75 = js1b$JSD,
+#            
+#            baseline.js.gt.0.75= js2b$JSD,
+#            
+#            scMILD.js.lt.0.25 = js1c$JSD,
+#            
+#            baseline.js.lt.0.25= js2c$JSD))
+# }
+# 
+# js_lupus2 = JS_twoScore2(lupus_dat)
+# js_ns2 = JS_twoScore2(ns_dat)
+# js_pbmc2 = JS_twoScore2(pbmc_dat)
+# js_uc2 = JS_twoScore2(uc_dat)
+# js_res2 = rbind(Lupus=js_lupus2, NS=js_ns2, PBMC=js_pbmc2, UC=js_uc2)
+# 
+# 
+# write.csv(js_res2,file.path(res_dir,"JS_divergence2.csv"))
 
-## from http://tr.im/hH5A
-logsumexp <- function (x) {
-  y = max(x)
-  y + log(sum(exp(x - y)))
-}
-softmax <- function (x) {
-  exp(x - logsumexp(x))
-}
-minmax = function(x){
-  if(length(x)> 1){
-    y= (x - min(x))/(max(x) - min(x))
-  }else{
-    y = x
-  }
-  
-  return(y)
-}
-library(dplyr)
 
-
-twoScoreSoftMax_withinSample = function(dat, sample_col = "Sample"){
-  dat_softmax = dat %>% 
-    group_by(!!sym(sample_col),exp) %>%
-    mutate(cell_score_teacher_sm = softmax(cell_score_teacher)) %>% 
-    mutate(cell_score_teacher_sm.baseline = softmax(cell_score_teacher.baseline))
-  
-  dat$cell_score_teacher_sm = dat_softmax$cell_score_teacher_sm
-  dat$cell_score_teacher_sm.baseline = dat_softmax$cell_score_teacher_sm.baseline
-  return(dat)
-}
-
-
-uc_dat = twoScoreSoftMax_withinSample(uc_dat)
-pbmc_dat =twoScoreSoftMax_withinSample(pbmc_dat, "sample")
-lupus_dat =twoScoreSoftMax_withinSample(lupus_dat, "sample_id_numeric")
-
-ns_dat = twoScoreSoftMax_withinSample(ns_dat, "ind_cov")
-
-cor(uc_dat$cell_score_teacher_sm, uc_dat$cell_score_teacher_sm.baseline)
-cor(pbmc_dat_test$cell_score_teacher_sm, pbmc_dat_test$cell_score_teacher_sm.baseline)
-cor(ns_dat$cell_score_teacher_sm, ns_dat$cell_score_teacher_sm.baseline)
-cor(lupus_dat$cell_score_teacher_sm, lupus_dat$cell_score_teacher_sm.baseline)
-
-
-twoScoreSoftMax_MinMax_withinSample = function(dat, sample_col= "Sample") {
-  dat_minmax_after_softmax = dat %>%
-    group_by(!!sym(sample_col),exp) %>%
-    mutate(cell_score_teacher_sm_mm = minmax(cell_score_teacher_sm)) %>% 
-    mutate(cell_score_teacher_sm_mm.baseline = minmax(cell_score_teacher_sm.baseline))
-  
-  dat$cell_score_teacher_sm_mm = dat_minmax_after_softmax$cell_score_teacher_sm_mm
-  dat$cell_score_teacher_sm_mm.baseline = dat_minmax_after_softmax$cell_score_teacher_sm_mm.baseline
-  return(dat)
-}
-uc_dat = twoScoreSoftMax_MinMax_withinSample(uc_dat)
-pbmc_dat = twoScoreSoftMax_MinMax_withinSample(pbmc_dat,"sample")
-lupus_dat = twoScoreSoftMax_MinMax_withinSample(lupus_dat, "sample_id_numeric")
-ns_dat = twoScoreSoftMax_MinMax_withinSample(ns_dat, "ind_cov")
-uc_dat$cell_score_teacher_sm_mm
-cor(uc_dat$cell_score_teacher_sm_mm, uc_dat$cell_score_teacher_sm_mm.baseline)
-cor(pbmc_dat$cell_score_teacher_sm_mm, pbmc_dat$cell_score_teacher_sm_mm.baseline)
-cor(pbmc_dat$cell_score_teacher_sm_mm, pbmc_dat$cell_score_teacher_sm_mm.baseline)
-
-cor(pbmc_dat_test$cell_score_teacher_sm, pbmc_dat_test$cell_score_teacher_sm.baseline)
-cor(ns_dat$cell_score_teacher_sm, ns_dat$cell_score_teacher_sm.baseline)
-cor(lupus_dat$cell_score_teacher_sm, lupus_dat$cell_score_teacher_sm.baseline)
-
-fwrite(pbmc_dat, file.path(res_dir, "pbmc_dat.csv"),sep=",")
-fwrite(ns_dat, file.path(res_dir, "ns_dat.csv"),sep=",")
-fwrite(lupus_dat, file.path(res_dir, "lupus_dat.csv"),sep=",")
-fwrite(uc_dat, file.path(res_dir, "uc_dat.csv"),sep=",")
-
-
-
-
-
-vln_lupus_mxdelta = vlnPlot_twoScore(lupus_dat[exp==3], "Lupus","cell_score_minmax", "cell_score_minmax.baseline", color_lupus, c("Healthy","SLE"))
+## by AUC 
+vln_lupus_mxdelta = vlnPlot_twoScore(lupus_dat[exp==7], "Lupus","cell_score_minmax", "cell_score_minmax.baseline", color_lupus, c("Healthy","SLE"))
 
 vln_ns_mxdelta = vlnPlot_twoScore(ns_dat[exp==3],"COVID-19 NS", "cell_score_minmax", "cell_score_minmax.baseline", color_ns, c("Normal","COVID-19"))
-
-vln_pbmc_mxdelta = vlnPlot_twoScore(pbmc_dat[exp==6], "COVID-19 PBMC","cell_score_minmax", "cell_score_minmax.baseline", color_pbmc, c("Not-Hosp.","Hosp."))
-
-vln_pbmc_mxdelta2 = vlnPlot_twoScore(pbmc_dat[exp==7], "COVID-19 PBMC","cell_score_minmax", "cell_score_minmax.baseline", color_pbmc, c("Not-Hosp.","Hosp."))
+vln_pbmc_mxdelta = vlnPlot_twoScore(pbmc_dat[exp==4], "COVID-19 PBMC","cell_score_minmax", "cell_score_minmax.baseline", color_pbmc, c("Not-Hosp.","Hosp."))
 
 vln_uc_mxdelta = vlnPlot_twoScore(uc_dat[exp==8],"UC", "cell_score_minmax", "cell_score_minmax.baseline", color_uc, c("Healthy","Inflamed"))
-
-
-vln_lupus_delta = vlnPlot_twoScore(lupus_dat[exp %in% c(3,6,8)], "Lupus","cell_score_minmax", "cell_score_minmax.baseline", color_lupus, c("Healthy","SLE"))
-
-
-
-
 
 
 vln_collect_mxdelta = ggarrange(plotlist= list(vln_lupus_mxdelta, vln_ns_mxdelta, vln_pbmc_mxdelta, vln_uc_mxdelta), ncol=2, nrow=2)
 
 vln_collect_wide_mxdelta = ggarrange(plotlist= list(vln_lupus_mxdelta, vln_ns_mxdelta, vln_pbmc_mxdelta, vln_uc_mxdelta), ncol=4, nrow=1)
-vln_collect_mxdelta
-vln_collect_wide_mxdelta
 ggexport(vln_collect_mxdelta, filename = paste0(res_dir,"/vlnPlot_twoScore_maxDeltaAUC.pdf"), content = "page")
 ggexport(vln_collect_wide_mxdelta, filename = paste0(res_dir,"/vlnPlot_twoScore_wide_maxDeltaAUC.pdf"), content = "page",width = 16,height=4)
 

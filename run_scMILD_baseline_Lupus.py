@@ -100,7 +100,7 @@ for exp in range(1, 9):
     scMILD_neg_weight = 0.1
     scMILD_stuOpt = 500
     scMILD_patience = 15
-    add_suffix = "baseline_sbatch512_tbatch7"
+    add_suffix = "baseline_sbatch512_tbatch7_rep"
     exp_writer = SummaryWriter(f'runs/Lupus')
     #default patience = 15 
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=True, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
@@ -108,3 +108,4 @@ for exp in range(1, 9):
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
     torch.cuda.empty_cache()
+    del test_optimizer, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl, exp_writer
