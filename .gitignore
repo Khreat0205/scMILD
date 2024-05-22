@@ -15,4 +15,4 @@ events.out.tfevents.*
 *.pdf
 *.rds
 *.RDS
-!requiremnts.txt
+!requirements.txt
