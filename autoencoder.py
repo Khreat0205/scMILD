@@ -9,14 +9,15 @@ import numpy as np
 import argparse
 import json
 import random
-from utils import *
-from dataset import *
-from model import *
+import copy
+import pandas
+from src.dataset import InstanceDataset
+from src.utils import set_random_seed, load_dataset_and_preprocessors
+from src.model import AENB
+
 from tqdm import tqdm as tdqm
 import time
-import copy
 
-ae_prototypes = 3
 ae_learning_rate = 1e-3
 ae_epochs = 250
 ae_patience = 15
@@ -34,32 +35,19 @@ hyperparameters_dict = {
 }
 
 
-dir_path="lupus/disease"
-base_path = f"../ProtoCell4P-main/data/{dir_path}/"
-target_dir = f'{base_path}/VAE/'
+base_path = f"data/Lupus"
+target_dir = f'{base_path}/AE/'
 if not os.path.exists(target_dir):
     os.makedirs(target_dir, exist_ok=False)
 
-hyperparameter_file_path = os.path.join(target_dir, 'hyperparameters_vae_8.json')
+hyperparameter_file_path = os.path.join(target_dir, 'hyperparameters_ae.json')
 if not os.path.exists(hyperparameter_file_path):
     with open(hyperparameter_file_path, 'w') as file:
         json.dump(hyperparameters_dict, file, indent=4)
         
-device_num = 5
+device_num = 4
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
-
-
-
-def load_dataset_and_preprocessors(base_path, exp, device):
-    train_dataset = torch.load(f"{base_path}/train_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    val_dataset = torch.load(f"{base_path}/val_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    test_dataset = torch.load(f"{base_path}/test_dataset_exp{exp}_HVG_count_noflt.pt", map_location=device)
-    
-    with open(f"{base_path}/label_encoder_exp{exp}_HVG_count_noflt.pkl", 'rb') as f:
-        label_encoder = pickle.load(f)
-
-    return train_dataset, val_dataset, test_dataset, label_encoder
 
 
 def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
@@ -114,7 +102,6 @@ def _train_or_test(model=None, dataloader=None, optimizer=None, device='cuda'):
 
 def train(model, optimizer=None, dataloader=None, device='cuda'):
     assert(optimizer is not None)
-    
     print('\ttrain')
     model.train()
     return _train_or_test(model, optimizer=optimizer, dataloader=dataloader,device=device)
@@ -144,6 +131,7 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     for epoch in range(n_epochs):
         print('epoch: \t{0}'.format(epoch))
         train_recon = train(model=ae, dataloader=train_dl,optimizer=optimizer, device=device)
+        # train_recon_addition = train(model=ae, dataloader=train_dl_addition,optimizer=optimizer, device=device)
         print('\n')
         val_recon = test(model=ae, dataloader=val_dl, device=device)
         avg_val_loss = val_recon
@@ -163,25 +151,20 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     return ae
 
 
-# exp = 2
 
 for exp in tdqm(range(1,9),  desc="Experiment"):
     ################################## Load Dataset - Instance ###############
-    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp,device)
-
+    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
+    
     train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
     val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     del train_dataset, val_dataset, test_dataset
-    # randomness
-    torch.manual_seed(exp)
-    torch.cuda.manual_seed(exp)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(exp)
-    random.seed(exp)
-    torch.cuda.manual_seed_all(exp)
+    
+    set_random_seed(exp)
+    
     ################################## Set Encoding Model ####################
+    ## UC, 2000 HVGs / Lupus, 3000 HVGs
     ae = AENB(input_dim=3000, latent_dim=ae_latent_dim, 
                         device=device, hidden_layers=ae_hidden_layers, 
                         activation_function=nn.Sigmoid).to(device)

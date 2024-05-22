@@ -10,9 +10,11 @@ import argparse
 import json
 import random
 import copy
-from utils import *
-from dataset import *
-from model import *
+import pandas
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+from src.dataset import InstanceDataset
+from src.utils import set_random_seed, load_dataset_and_preprocessors
+from src.model import AENB
 from tqdm import tqdm as tdqm
 import time
 

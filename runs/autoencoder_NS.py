@@ -10,9 +10,11 @@ import argparse
 import json
 import random
 import copy
-from utils import *
-from dataset import *
-from model import *
+import pandas
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+from src.dataset import InstanceDataset
+from src.utils import set_random_seed, load_dataset_and_preprocessors
+from src.model import AENB
 from tqdm import tqdm as tdqm
 import time
 
@@ -34,7 +36,7 @@ hyperparameters_dict = {
 
 
 # dir_path="lupus/disease"
-base_path = f"data/Lupus"
+base_path = f"data/NS"
 target_dir = f'{base_path}/AE/'
 if not os.path.exists(target_dir):
     os.makedirs(target_dir, exist_ok=False)
@@ -154,7 +156,8 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
 for exp in tdqm(range(1,9),  desc="Experiment"):
     ################################## Load Dataset - Instance ###############
     train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
-    
+    train_dataset_addition = torch.load(f"{base_path}/autoencoder_addition_train_dataset_exp{exp}.pt", map_location=device) ## NS-specific process
+    train_dataset = ConcatDataset([train_dataset,train_dataset_addition]) ## NS-specific process
     train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
     val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
@@ -163,7 +166,6 @@ for exp in tdqm(range(1,9),  desc="Experiment"):
     set_random_seed(exp)
     
     ################################## Set Encoding Model ####################
-    ## UC, 2000 HVGs / Lupus, 3000 HVGs
     ae = AENB(input_dim=3000, latent_dim=ae_latent_dim, 
                         device=device, hidden_layers=ae_hidden_layers, 
                         activation_function=nn.Sigmoid).to(device)
