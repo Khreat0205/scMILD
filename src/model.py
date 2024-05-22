@@ -154,6 +154,7 @@ class EncoderBranch(nn.Module):
         nn.init.xavier_normal_(m.weight.data)
         if m.bias is not None:
           nn.init.zeros_(m.bias.data)
+
 ### AENB
 class AENB(nn.Module):
     def __init__(self, input_dim, latent_dim, device, hidden_layers, activation_function=nn.ReLU):

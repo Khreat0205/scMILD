@@ -11,45 +11,52 @@ from src.dataset import MilDataset, InstanceDataset, InstanceDataset2, collate, 
 from src.utils import set_random_seed, load_dataset_and_preprocessors
 from src.model import AENB, AttentionModule, TeacherBranch, StudentBranch
 from src.optimizer import Optimizer
-
 from torch.utils.tensorboard import SummaryWriter
-base_path = 'data/MyData'
+dataset = "MyData"
+base_path = f'data/{dataset}'
 ae_dir = f'{base_path}/AE/'
 
-device_num = 4
-device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
-print("INFO: Using device: {}".format(device))
-
 hyperparameter_file_path = os.path.join(ae_dir, f'hyperparameters_ae.json')
-
 with open(hyperparameter_file_path, 'r') as file:
     loaded_args_dict = json.load(file)       
     
 loaded_args = argparse.Namespace(**loaded_args_dict)
-
-
 ae_learning_rate = loaded_args.ae_learning_rate
-ae_epochs = loaded_args.ae_epochs
-ae_patience = loaded_args.ae_patience
 ae_latent_dim = loaded_args.ae_latent_dim
 ae_hidden_layers = loaded_args.ae_hidden_layers
-ae_batch_size = loaded_args.ae_batch_size
+
+### Hyperparameters for scMILD
+device_num = 4
+data_dim = 2000
+mil_latent_dim = 64
+student_batch_size = 256
+teacher_learning_rate = 1e-3
+student_learning_rate = 1e-3
+encoder_learning_rate = 1e-3
+scMILD_epoch = 100
+scMILD_neg_weight = 0.3
+scMILD_stuOpt = 3
+scMILD_patience = 15
+add_suffix = "reported"
+n_exp = 8
+exps = range(1, n_exp + 1)
 
 
-for exp in range(1, 9):
+device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
+print("INFO: Using device: {}".format(device))
+
+for exp in exps:
     print(f'Experiment {exp}')
     train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
-
     instance_train_dataset = update_instance_labels_with_bag_labels(train_dataset, device=device)
     instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
     instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
     
     set_random_seed(exp)
-
-    vae_batch_size = 256
-    instance_train_dl = DataLoader(instance_train_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
-    instance_val_dl = DataLoader(instance_val_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)
-    instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(vae_batch_size/2), shuffle=False, drop_last=False)
+    
+    instance_train_dl = DataLoader(instance_train_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
+    instance_val_dl = DataLoader(instance_val_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
+    instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(student_batch_size/2), shuffle=False, drop_last=False)
     del instance_train_dataset, instance_val_dataset, instance_test_dataset
     
     bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
@@ -63,14 +70,13 @@ for exp in range(1, 9):
     del bag_train, bag_val, bag_test
 
     
-
-    ae = AENB(input_dim=2000, latent_dim=ae_latent_dim, 
+    ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim, 
                             device=device, hidden_layers=ae_hidden_layers, 
                             activation_function=nn.Sigmoid).to(device)
     ae.load_state_dict(torch.load(f"{ae_dir}/aenb_{exp}.pth"))
     
 
-    mil_latent_dim = 64
+    
     encoder_dim = ae_latent_dim
     model_encoder = ae.features
     attention_module = AttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
@@ -82,23 +88,16 @@ for exp in range(1, 9):
     
     model_teacher.to(device)
     model_student.to(device)
-    teacher_learning_rate = 1e-3
-    student_learning_rate = 1e-3
-    encoder_learning_rate = 1e-3
+    
     optimizer_teacher = torch.optim.Adam(model_teacher.parameters(), lr=teacher_learning_rate)
-
     optimizer_student = torch.optim.Adam(model_student.parameters(), lr=student_learning_rate)
-
     optimizer_encoder = torch.optim.Adam(model_encoder.parameters(), lr=encoder_learning_rate)
     
-    scMILD_epoch = 100
-    scMILD_neg_weight = 0.3
-    scMILD_stuOpt = 3
-    scMILD_patience = 15
-    add_suffix = "reported"
-    exp_writer = SummaryWriter(f'runs/MyData')
+    exp_writer = SummaryWriter(f'runs/{dataset}')
     test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
-                              patience=scMILD_patience, csv=f'results/ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', saved_path=f'results/model_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}')
+                              patience=scMILD_patience, 
+                              csv=f'results/{dataset}_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', 
+                              saved_path=f'results/{dataset}_model_ae_ed{encoder_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}')
     test_optimizer.optimize()
     print(test_optimizer.evaluate_teacher(400, test=True))
     torch.cuda.empty_cache()

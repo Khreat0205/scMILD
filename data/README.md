@@ -6,14 +6,14 @@ download the following file from the link https://ucsf.app.box.com/s/tds2gotok3l
 - CLUESImmVar_nonorm.V6.h5ad
 
 
-## download files for NS dataset
+## download files for COVID-19 NS dataset (NS)
 download the following files from https://singlecell.broadinstitute.org/single_cell/study/SCP1289/
 - 20210220_NasalSwab_RawCounts.txt
 - 20210701_NasalSwab_MetaData.txt
 - 20210220_NasalSwab_UMAP.txt
 
 
-## download files for PBMC dataset
+## download files for COVID-19 PBMC dataset (PBMC)
 download the following file from the link https://atlas.fredhutch.org/fredhutch/covid/
 - su_2020_processed.HDF5
 
