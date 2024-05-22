@@ -45,13 +45,7 @@ for exp in range(1, 9):
     instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
     instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
     
-    torch.manual_seed(exp)
-    torch.cuda.manual_seed(exp)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(exp)
-    random.seed(exp)
-    torch.cuda.manual_seed_all(exp)
+    set_random_seed(exp)
 
     vae_batch_size = 256
     instance_train_dl = DataLoader(instance_train_dataset, batch_size=vae_batch_size, shuffle=True, drop_last=False)

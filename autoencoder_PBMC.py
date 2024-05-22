@@ -160,13 +160,7 @@ for exp in tdqm(range(1,9),  desc="Experiment"):
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     del train_dataset, val_dataset, test_dataset
     
-    torch.manual_seed(exp)
-    torch.cuda.manual_seed(exp)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    np.random.seed(exp)
-    random.seed(exp)
-    torch.cuda.manual_seed_all(exp)
+    set_random_seed(exp)
     
     ################################## Set Encoding Model ####################
     ## PBMC, UC, 2000 HVGs / Lupus, 3000 HVGs

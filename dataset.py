@@ -96,15 +96,15 @@ def collate_np(batch):
 
 class InstanceDataset(Dataset):
     '''
-    인스턴스 단위로 데이터를 반환하는 Dataset 클래스.
-    MilDataset과 유사하지만, 각 인스턴스에 대한 데이터와 레이블을 반환합니다.
+    
+    instance-level dataset class.
+    similar to MilDataset. return labels and data of each instance
 
     Args:
-        data (Tensor): 특성 데이터
-        ids (Tensor): 각 인스턴스에 대응하는 백의 ID
-        labels (Tensor): 각 백에 대한 레이블
-        instance_labels (Tensor): 각 인스턴스에 대한 레이블
-        normalize (bool): 데이터 정규화 여부
+        data (Tensor): feature data
+        ids (Tensor): Bag id of each instance
+        labels (Tensor): bag labels
+        instance_labels (Tensor)
     '''
     def __init__(self, data, ids, labels, instance_labels, normalize=False):
         self.data = data
@@ -146,8 +146,8 @@ class InstanceDataset(Dataset):
 
 class InstanceDataset2(Dataset):
     '''
-    인스턴스 단위로 데이터를 반환하는 Dataset 클래스.
-    MilDataset과 유사하지만, 각 인스턴스에 대한 데이터와 레이블을 반환합니다.
+    Instance-level Dataset class.
+    similar to MilDataset. return labels and data of each instance
 
     Args:
         data (Tensor): 특성 데이터

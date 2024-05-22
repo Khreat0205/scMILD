@@ -14,6 +14,7 @@ from dataset import *
 from model import *
 from tqdm import tqdm as tdqm
 import time
+import copy
 
 ae_prototypes = 3
 ae_learning_rate = 1e-3
@@ -187,10 +188,10 @@ for exp in tdqm(range(1,9),  desc="Experiment"):
 
     ae_optimizer = torch.optim.Adam(ae.parameters(), lr= ae_learning_rate)
     ################################## Training VAE ####################
-    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb8_{exp}.pth")
+    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb_{exp}.pth")
 
 
-    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb8_test.csv")
+    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb_test.csv")
     
     del train_dl, val_dl, test_dl, ae, ae_optimizer, test_recon
     torch.cuda.empty_cache()
