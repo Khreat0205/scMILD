@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader
 import numpy as np
 import argparse
 import json
-import random
 from src.dataset import MilDataset, InstanceDataset, InstanceDataset2, collate, update_instance_labels_with_bag_labels
 from src.utils import set_random_seed, load_dataset_and_preprocessors
 from src.model import AENB, AttentionModule, TeacherBranch, StudentBranch
@@ -26,24 +25,24 @@ ae_latent_dim = loaded_args.ae_latent_dim
 ae_hidden_layers = loaded_args.ae_hidden_layers
 
 ### Hyperparameters for scMILD
-device_num = 4
+device_num = 6
 data_dim = 2000
 mil_latent_dim = 64
 student_batch_size = 256
 teacher_learning_rate = 1e-3
 student_learning_rate = 1e-3
 encoder_learning_rate = 1e-3
-scMILD_epoch = 100
+scMILD_epoch = 500
 scMILD_neg_weight = 0.3
 scMILD_stuOpt = 3
 scMILD_patience = 15
 add_suffix = "reported"
 n_exp = 8
-exps = range(1, n_exp + 1)
 
-
+###
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 print("INFO: Using device: {}".format(device))
+exps = range(1, n_exp + 1)
 
 for exp in exps:
     print(f'Experiment {exp}')
@@ -75,12 +74,10 @@ for exp in exps:
                             activation_function=nn.Sigmoid).to(device)
     ae.load_state_dict(torch.load(f"{ae_dir}/aenb_{exp}.pth"))
     
-
-    
     encoder_dim = ae_latent_dim
     model_encoder = ae.features
     attention_module = AttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
-
+    # To do: parameter of Teacher branch - the number of layers and the number of neurons in each layer 
     model_teacher = TeacherBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, 
                             attention_module=attention_module, num_classes=2, activation_function=nn.Tanh)
 

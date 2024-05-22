@@ -4,7 +4,9 @@ from torch import nn
 import time
 import copy
 import pandas
-
+from torch.utils.data import DataLoader
+from src.utils import load_dataset_and_preprocessors, set_random_seed
+from src.model import AENB
 
 def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
     # adapted from https://github.com/uhlerlab/STACI/blob/master/gae/gae/optimizer.py
@@ -101,3 +103,28 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     ae.load_state_dict(best_model_wts)  
     
     return ae
+
+
+def optimizer_ae(base_path, exp, device, data_dim, ae_latent_dim, ae_hidden_layers, ae_batch_size, ae_learning_rate, ae_epochs, ae_patience, target_dir):
+    ################################## Load Dataset - Instance ###############
+    train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
+    
+    train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
+    val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
+    test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
+    del train_dataset, val_dataset, test_dataset
+    set_random_seed(exp)
+
+    ################################## Set Model ####################
+    ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim, 
+                        device=device, hidden_layers=ae_hidden_layers, 
+                        activation_function=nn.Sigmoid).to(device)
+
+    ae_optimizer = torch.optim.Adam(ae.parameters(), lr=ae_learning_rate)
+
+    ################################## Training AE ####################
+    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb_{exp}.pth")
+
+    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb_test.csv")
+    del train_dl, val_dl, test_dl, ae, ae_optimizer, test_recon
+    torch.cuda.empty_cache()
