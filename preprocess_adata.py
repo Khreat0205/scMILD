@@ -4,8 +4,9 @@ import torch
 import modin.pandas as pd
 from src.utils import load_and_save_datasets_adata
 
-def preprocess_adata(data_dir, data_dim, obs_name_sample_label, obs_name_sample_id, obs_name_cell_type, 
-                    sample_label_negative, sample_label_positive, device_num, n_exp):
+def preprocess_adata(data_dir="data/MyData", data_dim=2000, obs_name_sample_label='Health',obs_name_sample_id='Subject', 
+                     obs_name_cell_type='Cluster', sample_label_negative='Healthy', sample_label_positive='Inflamed', 
+                     device_num=6, n_exp=8):
     ### preprocsessing adata
     adata = sc.read_h5ad(f'{data_dir}/adata.h5ad')
     adata_raw = adata.copy()
@@ -45,5 +46,4 @@ if __name__ == "__main__":
     parser.add_argument('--n_exp', type=int, default=8, help='Number of experiments')
 
     args = parser.parse_args()
-
-    preprocess_adata(args)
+    preprocess_adata(**vars(args))

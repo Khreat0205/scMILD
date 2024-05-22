@@ -1,12 +1,44 @@
-# scMILD: Single-cell Multiple Instance Learning for Disease classification and associated subpopulation Discovery
+# scMILD: Single-cell Multiple Instance Learning for Disease Classification and Associated Subpopulation Discovery
 
 We propose scMILD, a weakly supervised learning framework based on Multiple Instance Learning (MIL), which leverages sample-level labels to identify condition-associated cell subpopulations. By treating samples as bags and cells as instances, scMILD effectively learns cell-level representations and improves sample classification performance.
 
-## Data Preprocessing (*.h5ad)
+This repository contains the implementation of scMILD. The pipeline consists of three main steps: data preprocessing, autoencoder pretraining, and scMILD training.
+
+## Data Preparation
+
+The input data should be in the form of a single-cell gene expression matrix stored in the AnnData format (`.h5ad` file). The AnnData object should have the following structure:
+
+- `adata.X`: The gene expression matrix, where rows correspond to cells and columns correspond to genes.
+- `adata.obs`: A dataframe containing cell metadata, including the following columns:
+  - Sample label column (e.g., 'Health'): Indicates the sample label for each cell (e.g., 'Healthy', 'Inflamed').
+  - Sample ID column (e.g., 'Subject'): Indicates the sample ID for each cell.
+  - Cell type column (e.g., 'Cluster'): Indicates the cell type for each cell.
+
+Place the `.h5ad` file in the `data` directory with a specific dataset name (e.g., `data/MyData/adata.h5ad`).
+
+## Pipeline
+
+### 1. Data Preprocessing
+
+Run the `preprocess_adata.py` script to preprocess the data and save split datasets:
+
+```bash
+python preprocess_data.py --data_dir data/MyData --data_dim 2000 --obs_name_sample_label Health --obs_name_sample_id Subject --obs_name_cell_type Cluster --sample_label_negative Healthy --sample_label_positive Inflamed --device_num 6 --n_exp 8
+```
+This script performs the following steps:
+- Normalization and log transformation of the gene expression data.
+- Selection of highly variable genes.
+- Subset the data to include only the specified sample labels.
+- One-hot encoding of sample labels.
+- Splitting the data into train, validation, and test sets for multiple experiments.
+
+The preprocessed datasets will be saved in the `data/MyData` directory.
+
+#### Data Preprocessing Script
 
 `preprocess_adata.py`: This script preprocesses the data and saves split datasets.
 
-### Usage
+**Usage**
 ```bash
 python preprocess_data.py [--data_dir DATA_DIR] [--data_dim DATA_DIM] 
                           [--obs_name_sample_label OBS_NAME_SAMPLE_LABEL]
@@ -17,7 +49,7 @@ python preprocess_data.py [--data_dir DATA_DIR] [--data_dim DATA_DIM]
                           [--device_num DEVICE_NUM] [--n_exp N_EXP]
 ```
 
-### Arguments
+**Arguments**
 - `--data_dir`: Directory containing adata.h5ad (default: "data/MyData")
 - `--data_dim`: Number of top Highly varialbe genes to select (default: 2000)
 - `--obs_name_sample_label`: Obs column name for sample labels (default: 'Health')
@@ -28,15 +60,26 @@ python preprocess_data.py [--data_dir DATA_DIR] [--data_dim DATA_DIM]
 - `--device_num`: CUDA device number (default: 6)
 - `--n_exp`: Number of experiments (default: 8)
 
-### Example
+**Example**
 ```bash
 python preprocess_data.py --data_dir data/MyData --data_dim 2000 --obs_name_sample_label Health --obs_name_sample_id Subject --obs_name_cell_type Cluster --sample_label_negative Healthy --sample_label_positive Inflamed --device_num 6 --n_exp 8
 ```
 
-## Pretraining Autoencoder
+### 2. Autoencoder Pretraining
+
+Run the `pretraining_autoencoder.py` script to pretrain an autoencoder model:
+
+```bash
+python pretraining_autoencoder.py --data_dir data/MyData --device_num 6 --ae_learning_rate 1e-3 --ae_epochs 25 --ae_patience 3 --ae_latent_dim 128 --ae_hidden_layers 512 256 128 --ae_batch_size 128 --data_dim 2000 --n_exp 8
+```
+
+This script trains an autoencoder model on the preprocessed data. The trained autoencoder model will be saved in the `data/MyData/AE` directory.
+
+#### Autoencoder Pretraining Script
+
 `pretraining_autoencoder.py`: This script performs pretraining of an autoencoder model and saves the trained model.
 
-### Usage
+**Usage**
 ```bash
 python pretraining_autoencoder.py [--data_dir DATA_DIR] [--device_num DEVICE_NUM]
                                   [--ae_learning_rate AE_LEARNING_RATE] [--ae_epochs AE_EPOCHS]
@@ -46,7 +89,7 @@ python pretraining_autoencoder.py [--data_dir DATA_DIR] [--device_num DEVICE_NUM
                                   [--n_exp N_EXP]
 ```
 
-### Arguments
+**Arguments**
 - `--data_dir`: Data directory (default: "data/MyData")
 - `--device_num`: CUDA device number (default: 6)
 - `--ae_learning_rate`: Learning rate for autoencoder (default: 1e-3)
@@ -58,15 +101,26 @@ python pretraining_autoencoder.py [--data_dir DATA_DIR] [--device_num DEVICE_NUM
 - `--data_dim`: Data dimension (default: 2000)
 - `--n_exp`: Number of experiments (default: 8)
 
-### Example
+**Example**
 ```bash
 python pretraining_autoencoder.py --data_dir data/MyData --device_num 6 --ae_learning_rate 1e-3 --ae_epochs 25 --ae_patience 3 --ae_latent_dim 128 --ae_hidden_layers 512 256 128 --ae_batch_size 128 --data_dim 2000 --n_exp 8
 ```
 
-## scMILD Training
+### 3. scMILD Training
+
+Run the `train_scMILD.py` script to train the scMILD model:
+
+```bash
+python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --student_batch_size 256 --teacher_learning_rate 1e-3 --student_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
+```
+
+This script trains the scMILD model using the pretrained autoencoder. The trained scMILD model and evaluation results will be saved in the `results` directory.
+
+#### scMILD Training Script
+
 `train_scMILD.py`: This script performs training of the scMILD model and saves the trained model.
 
-### Usage
+**Usage**
 ```bash
 python train_scMILD.py [--data_dir DATA_DIR] [--dataset DATASET] 
                        [--device_num DEVICE_NUM] [--data_dim DATA_DIM]
@@ -79,7 +133,7 @@ python train_scMILD.py [--data_dir DATA_DIR] [--dataset DATASET]
                        [--add_suffix ADD_SUFFIX] [--n_exp N_EXP] [--exp EXP]
 ```
 
-### Arguments
+**Arguments**
 - `--data_dir`: Data directory (default: "data/MyData")
 - `--dataset`: Dataset name (default: "MyData")
 - `--device_num`: CUDA device number (default: 6)
@@ -97,7 +151,7 @@ python train_scMILD.py [--data_dir DATA_DIR] [--dataset DATASET]
 - `--n_exp`: Number of experiments (default: 8)
 - `--exp`: Experiment number (if None, all experiments will be run) (default: None)
 
-### Example
+**Example**
 Run all experiments:
 ```bash
 python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --student_batch_size 256 --teacher_learning_rate 1e-3 --student_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
@@ -108,8 +162,5 @@ Run a single experiment (e.g., experiment 3):
 python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --student_batch_size 256 --teacher_learning_rate 1e-3 --student_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8 --exp 3
 ```
 
-
-
 # Contact
 - scientist0205@snu.ac.kr
-

@@ -4,35 +4,39 @@ from src.utils import load_ae_hyperparameters, load_and_process_datasets, load_d
 from src.optimizer import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-def main(args):
-   ae_dir = f'{args.data_dir}/AE/'
+def train_scMILD(data_dir="data/MyData", dataset="MyData", device_num=6, data_dim=2000, mil_latent_dim=64, 
+                 student_batch_size=256, teacher_learning_rate=1e-3, student_learning_rate=1e-3, encoder_learning_rate=1e-3, 
+                 scMILD_epoch=500, scMILD_neg_weight=0.3, scMILD_stuOpt=3, scMILD_patience=15, add_suffix="reported", 
+                 n_exp=8, exp=None):
+    ae_dir = f'{data_dir}/AE/'
 
-   ae_latent_dim, ae_hidden_layers = load_ae_hyperparameters(ae_dir)
+    ae_latent_dim, ae_hidden_layers = load_ae_hyperparameters(ae_dir)
 
-   device = torch.device(f'cuda:{args.device_num}' if torch.cuda.is_available() else 'cpu')
-   print("INFO: Using device: {}".format(device))
+    device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
+    print("INFO: Using device: {}".format(device))
 
-   if args.exp is None:
-       exps = range(1, args.n_exp + 1)
-   else:
-       exps = [args.exp]
+    if exp is None:
+        exps = range(1, n_exp + 1)
+    else:
+        exps = [exp]
 
-   for exp in exps:
-       print(f'Experiment {exp}')
-       instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test = load_and_process_datasets(args.data_dir, exp, device, args.student_batch_size)
-       
-       bag_train_dl, bag_val_dl, bag_test_dl = load_dataloaders(bag_train, bag_val, bag_test)
+    for exp in exps:
+        print(f'Experiment {exp}')
+        instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test = load_and_process_datasets(data_dir, exp, device, student_batch_size)
+        
+        bag_train_dl, bag_val_dl, bag_test_dl = load_dataloaders(bag_train, bag_val, bag_test)
 
-       model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder = load_model_and_optimizer(args.data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, args.mil_latent_dim, args.teacher_learning_rate, args.student_learning_rate, args.encoder_learning_rate)
-       
-       exp_writer = SummaryWriter(f'runs/{args.dataset}')
-       test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  args.scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=args.scMILD_stuOpt,stu_loss_weight_neg= args.scMILD_neg_weight, writer=exp_writer,
-                                 patience=args.scMILD_patience, 
-                                 csv=f'results/{args.dataset}_ae_ed{ae_latent_dim}_md{args.mil_latent_dim}_lr{args.teacher_learning_rate}_{args.scMILD_epoch}_{args.scMILD_neg_weight}_{args.scMILD_stuOpt}_{args.scMILD_patience}_{args.add_suffix}.csv', 
-                                 saved_path=f'results/{args.dataset}_model_ae_ed{ae_latent_dim}_md{args.mil_latent_dim}_lr{args.teacher_learning_rate}_{args.scMILD_epoch}_{args.scMILD_neg_weight}_{args.scMILD_stuOpt}_{args.scMILD_patience}_{args.add_suffix}')
-       test_optimizer.optimize()
-       print(test_optimizer.evaluate_teacher(400, test=True))
-       torch.cuda.empty_cache()
+        model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder = load_model_and_optimizer(data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim, teacher_learning_rate, student_learning_rate, encoder_learning_rate)
+        
+        exp_writer = SummaryWriter(f'runs/{dataset}')
+        test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
+                                  patience=scMILD_patience, 
+                                  csv=f'results/{dataset}_ae_ed{ae_latent_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', 
+                                  saved_path=f'results/{dataset}_model_ae_ed{ae_latent_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}')
+        test_optimizer.optimize()
+        print(test_optimizer.evaluate_teacher(400, test=True))
+        torch.cuda.empty_cache()
+
 
 if __name__ == "__main__":
    parser = argparse.ArgumentParser(description='scMILD Training')
@@ -54,4 +58,4 @@ if __name__ == "__main__":
    parser.add_argument('--exp', type=int, default=None, help='Experiment number (if None, all experiments will be run)')
 
    args = parser.parse_args()
-   main(args)
+   train_scMILD(**vars(args))
