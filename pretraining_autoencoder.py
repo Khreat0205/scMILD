@@ -6,8 +6,8 @@ import json
 from src.trainer_ae import optimizer_ae
 from tqdm import tqdm as tdqm
 
-def main(args):
-    base_path = f"data/{args.dataset}"
+def pretraining_autoencoder(args):
+    base_path = args.data_dir
     target_dir = f'{base_path}/AE/'
     
     if not os.path.exists(target_dir):
@@ -38,7 +38,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Pretraining Autoencoder')
-    parser.add_argument('--dataset', type=str, default="MyData", help='Dataset name')
+    parser.add_argument('--data_dir', type=str, default="data/MyData", help='Data directory')
     parser.add_argument('--device_num', type=int, default=6, help='CUDA device number')
     parser.add_argument('--ae_learning_rate', type=float, default=1e-3, help='Learning rate for autoencoder')
     parser.add_argument('--ae_epochs', type=int, default=15, help='Number of epochs for autoencoder training')
@@ -51,4 +51,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    main(args)
+    pretraining_autoencoder(args)

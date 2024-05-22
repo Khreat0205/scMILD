@@ -1,10 +1,16 @@
+import os 
 import torch
 import pickle
 import numpy as np
 import random
+import json
+import argparse
+from torch import nn
+from torch.utils.data import DataLoader
 from sklearn.preprocessing import LabelEncoder
 from scipy.sparse import issparse
-from src.dataset import InstanceDataset
+from src.dataset import MilDataset, InstanceDataset, collate, update_instance_labels_with_bag_labels
+from src.model import AENB, AttentionModule, TeacherBranch, StudentBranch
 from sklearn.model_selection import train_test_split
 
 def load_mil_dataset_from_adata(adata, label_encoder=None, is_train=True, device='cpu'):
@@ -113,4 +119,61 @@ def set_random_seed(exp):
     np.random.seed(exp)
     random.seed(exp)
     torch.cuda.manual_seed_all(exp)
-# git test
+
+
+
+def load_ae_hyperparameters(ae_dir):
+    hyperparameter_file_path = os.path.join(ae_dir, f'hyperparameters_pretraining_autoencoder.json')
+    with open(hyperparameter_file_path, 'r') as file:
+        loaded_args_dict = json.load(file)       
+        
+    loaded_args = argparse.Namespace(**loaded_args_dict)
+    return loaded_args.ae_latent_dim, loaded_args.ae_hidden_layers
+
+def load_and_process_datasets(data_dir, exp, device, student_batch_size):
+    train_dataset, val_dataset, test_dataset, _ = load_dataset_and_preprocessors(data_dir, exp, device)
+    instance_train_dataset = update_instance_labels_with_bag_labels(train_dataset, device=device)
+    instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
+    instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
+    
+    set_random_seed(exp)
+    
+    instance_train_dl = DataLoader(instance_train_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
+    instance_val_dl = DataLoader(instance_val_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
+    instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(student_batch_size/2), shuffle=False, drop_last=False)
+    
+    bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
+    bag_val = MilDataset(val_dataset.data.to(device), val_dataset.ids.unsqueeze(0).to(device), val_dataset.labels.to(device), val_dataset.instance_labels.to(device))
+    bag_test = MilDataset(test_dataset.data.to(device), test_dataset.ids.unsqueeze(0).to(device), test_dataset.labels.to(device), test_dataset.instance_labels.to(device))
+    
+    return instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test
+
+def load_dataloaders(bag_train, bag_val, bag_test):
+    bag_train_dl = DataLoader(bag_train,batch_size = 14, shuffle=False, drop_last=False,collate_fn=collate)
+    bag_val_dl = DataLoader(bag_val,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
+    bag_test_dl = DataLoader(bag_test,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
+    return bag_train_dl, bag_val_dl, bag_test_dl
+
+
+def load_model_and_optimizer(data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim, teacher_learning_rate, student_learning_rate, encoder_learning_rate):
+    ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim, 
+                            device=device, hidden_layers=ae_hidden_layers, 
+                            activation_function=nn.Sigmoid).to(device)
+    ae.load_state_dict(torch.load(f"{ae_dir}/aenb_{exp}.pth"))
+    
+    encoder_dim = ae_latent_dim
+    model_encoder = ae.features
+    attention_module = AttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
+    model_teacher = TeacherBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, 
+                            attention_module=attention_module, num_classes=2, activation_function=nn.Tanh)
+
+    model_student = StudentBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, num_classes=2, activation_function=nn.Tanh)
+    
+    model_teacher.to(device)
+    model_student.to(device)
+    
+    optimizer_teacher = torch.optim.Adam(model_teacher.parameters(), lr=teacher_learning_rate)
+    optimizer_student = torch.optim.Adam(model_student.parameters(), lr=student_learning_rate)
+    optimizer_encoder = torch.optim.Adam(model_encoder.parameters(), lr=encoder_learning_rate)
+    
+    return model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder

@@ -46,6 +46,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    preprocess_adata(args.data_dir, args.data_dim, args.obs_name_sample_label, args.obs_name_sample_id, 
-                    args.obs_name_cell_type, args.sample_label_negative, args.sample_label_positive, 
-                    args.device_num, args.n_exp)
+    preprocess_adata(args)
