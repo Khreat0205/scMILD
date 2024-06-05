@@ -163,4 +163,4 @@ python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --
 ```
 
 # Contact
-- scientist0205@snu.ac.kr
+- Kyeonghun Jeong, scientist0205@snu.ac.kr
