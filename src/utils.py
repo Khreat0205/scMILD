@@ -12,6 +12,8 @@ from scipy.sparse import issparse
 from src.dataset import MilDataset, InstanceDataset, collate, update_instance_labels_with_bag_labels
 from src.model import AENB, AttentionModule, TeacherBranch, StudentBranch
 from sklearn.model_selection import train_test_split
+from torch.utils.data import WeightedRandomSampler
+
 
 def load_mil_dataset_from_adata(adata, label_encoder=None, is_train=True, device='cpu'):
     instance_labels = adata.obs['cell_type'].values
@@ -133,20 +135,33 @@ def load_ae_hyperparameters(ae_dir):
 def load_and_process_datasets(data_dir, exp, device, student_batch_size):
     train_dataset, val_dataset, test_dataset, _ = load_dataset_and_preprocessors(data_dir, exp, device)
     instance_train_dataset = update_instance_labels_with_bag_labels(train_dataset, device=device)
-    instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
-    instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
+    # instance_val_dataset = update_instance_labels_with_bag_labels(val_dataset, device=device)
+    # instance_test_dataset = update_instance_labels_with_bag_labels(test_dataset, device=device)
     
     set_random_seed(exp)
     
-    instance_train_dl = DataLoader(instance_train_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
-    instance_val_dl = DataLoader(instance_val_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
-    instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(student_batch_size/2), shuffle=False, drop_last=False)
+    #### add 06 04 _ sampler
+    # Calculate weights for each combined label
+    label_counts = instance_train_dataset.bag_labels.bincount()
+    label_weights = 1.0 / label_counts
+    instance_weights = label_weights[instance_train_dataset.bag_labels]
+    # Define your DataLoader
+    num_workers = 16  
+    pin_memory = True
+    prefetch_factor_student = 4
+    # Create a WeightedRandomSampler
+    sampler = WeightedRandomSampler(instance_weights, len(instance_train_dataset))
+    
+    # instance_train_dl = DataLoader(instance_train_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False)
+    instance_train_dl = DataLoader(instance_train_dataset, batch_size=student_batch_size, sampler=sampler, drop_last=False, prefetch_factor=prefetch_factor_student, num_workers=num_workers, pin_memory=pin_memory)    
+    # instance_val_dl = DataLoader(instance_val_dataset, batch_size=student_batch_size, shuffle=True, drop_last=False, prefetch_factor=prefetch_factor_student, num_workers=num_workers, pin_memory=pin_memory)
+    # instance_test_dl = DataLoader(instance_test_dataset, batch_size=round(student_batch_size/2), shuffle=False, drop_last=False,  prefetch_factor=prefetch_factor_student, num_workers=num_workers, pin_memory=pin_memory)
     
     bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
     bag_val = MilDataset(val_dataset.data.to(device), val_dataset.ids.unsqueeze(0).to(device), val_dataset.labels.to(device), val_dataset.instance_labels.to(device))
     bag_test = MilDataset(test_dataset.data.to(device), test_dataset.ids.unsqueeze(0).to(device), test_dataset.labels.to(device), test_dataset.instance_labels.to(device))
-    
-    return instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test
+    # return instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test
+    return instance_train_dl, bag_train, bag_val, bag_test
 
 def load_dataloaders(bag_train, bag_val, bag_test):
     bag_train_dl = DataLoader(bag_train,batch_size = 14, shuffle=False, drop_last=False,collate_fn=collate)

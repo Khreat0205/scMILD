@@ -327,7 +327,7 @@ cds_each_celltype[[4]]= order_cells(cds_each_celltype[[4]],root_pr_nodes = c("Y_
 i = 4
 cds_each_celltype[[i]]$tmp_cluster = paste0(cds_each_celltype[[i]]$Health," ", cds_each_celltype[[i]]$cell_score_teacher_out)
 cds_each_celltype[[i]]$tmp_cluster = factor(cds_each_celltype[[i]]$tmp_cluster,levels=c("Healthy Negative","Healthy Positive", "Non-inflamed Negative","Inflamed Negative", "Non-inflamed Positive", "Inflamed Positive" ), labels = c("Healthy","Healthy", "Non-inflamed Negative", "Inflamed Negative" , "Non-inflamed Positive", "Inflamed Positive" ))
-
+target_cell_types
 
 
 

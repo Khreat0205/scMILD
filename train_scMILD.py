@@ -2,12 +2,12 @@ import torch
 import argparse
 from src.utils import load_ae_hyperparameters, load_and_process_datasets, load_dataloaders, load_model_and_optimizer
 from src.optimizer import Optimizer
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 def train_scMILD(data_dir="data/MyData", dataset="MyData", device_num=6, data_dim=2000, mil_latent_dim=64, 
                  student_batch_size=256, teacher_learning_rate=1e-3, student_learning_rate=1e-3, encoder_learning_rate=1e-3, 
-                 scMILD_epoch=500, scMILD_neg_weight=0.3, scMILD_stuOpt=3, scMILD_patience=15, add_suffix="reported", 
-                 n_exp=8, exp=None):
+                 scMILD_epoch=500, scMILD_neg_weight=0.3,scMILD_stuOpt=3, scMILD_patience=15, val_combined_metric = False, add_suffix="reported", 
+                 n_exp=8, exp=None, gmm= False):
     ae_dir = f'{data_dir}/AE/'
 
     ae_latent_dim, ae_hidden_layers = load_ae_hyperparameters(ae_dir)
@@ -22,17 +22,19 @@ def train_scMILD(data_dir="data/MyData", dataset="MyData", device_num=6, data_di
 
     for exp in exps:
         print(f'Experiment {exp}')
-        instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test = load_and_process_datasets(data_dir, exp, device, student_batch_size)
+        # instance_train_dl, instance_val_dl, instance_test_dl, bag_train, bag_val, bag_test = load_and_process_datasets(data_dir, exp, device, student_batch_size)
+        instance_train_dl, bag_train, bag_val, bag_test = load_and_process_datasets(data_dir, exp, device, student_batch_size)
         
         bag_train_dl, bag_val_dl, bag_test_dl = load_dataloaders(bag_train, bag_val, bag_test)
 
         model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder = load_model_and_optimizer(data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim, teacher_learning_rate, student_learning_rate, encoder_learning_rate)
         
-        exp_writer = SummaryWriter(f'runs/{dataset}')
-        test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl, instance_val_dl, instance_test_dl,  scMILD_epoch, device, val_combined_metric=False, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
+        # exp_writer = SummaryWriter(f'runs/{dataset}')
+        exp_writer = None
+        test_optimizer= Optimizer(exp, model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder, bag_train_dl, bag_val_dl, bag_test_dl, instance_train_dl,   scMILD_epoch, device, val_combined_metric=val_combined_metric, stuOptPeriod=scMILD_stuOpt,stu_loss_weight_neg= scMILD_neg_weight, writer=exp_writer,
                                   patience=scMILD_patience, 
                                   csv=f'results/{dataset}_ae_ed{ae_latent_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}.csv', 
-                                  saved_path=f'results/{dataset}_model_ae_ed{ae_latent_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}')
+                                  saved_path=f'results/{dataset}_model_ae_ed{ae_latent_dim}_md{mil_latent_dim}_lr{teacher_learning_rate}_{scMILD_epoch}_{scMILD_neg_weight}_{scMILD_stuOpt}_{scMILD_patience}_{add_suffix}', gmm=gmm)
         test_optimizer.optimize()
         print(test_optimizer.evaluate_teacher(400, test=True))
         torch.cuda.empty_cache()
@@ -53,9 +55,11 @@ if __name__ == "__main__":
    parser.add_argument('--scMILD_neg_weight', type=float, default=0.3, help='Negative weight for scMILD')
    parser.add_argument('--scMILD_stuOpt', type=int, default=3, help='Student optimization period')
    parser.add_argument('--scMILD_patience', type=int, default=15, help='Patience for early stopping')
+   parser.add_argument('--val_combined_metric', type=bool, default=False, help='Use combined metric for validation')
    parser.add_argument('--add_suffix', type=str, default="reported", help='Suffix for output files')
    parser.add_argument('--n_exp', type=int, default=8, help='Number of experiments')
    parser.add_argument('--exp', type=int, default=None, help='Experiment number (if None, all experiments will be run)')
+   parser.add_argument('--gmm', type=bool, default=False, help='Use GMM for student')
 
    args = parser.parse_args()
    train_scMILD(**vars(args))
