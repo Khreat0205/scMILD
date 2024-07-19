@@ -1,4 +1,4 @@
-# scMILD: Single-cell Multiple Instance Learning for Disease Classification and Associated Subpopulation Discovery
+# scMILD: Single-cell Multiple Instance Learning for Sample Classification and Associated Subpopulation Discovery
 
 We propose scMILD, a weakly supervised learning framework based on Multiple Instance Learning (MIL), which leverages sample-level labels to identify condition-associated cell subpopulations. By treating samples as bags and cells as instances, scMILD effectively learns cell-level representations and improves sample classification performance.
 
