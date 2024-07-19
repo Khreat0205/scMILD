@@ -60,6 +60,7 @@ python preprocess_data.py [--data_dir DATA_DIR] [--data_dim DATA_DIM]
 - `--device_num`: CUDA device number (default: 6)
 - `--n_exp`: Number of experiments (default: 8)
 
+
 **Example**
 ```bash
 python preprocess_data.py --data_dir data/MyData --data_dim 2000 --obs_name_sample_label Health --obs_name_sample_id Subject --obs_name_cell_type Cluster --sample_label_negative Healthy --sample_label_positive Inflamed --device_num 6 --n_exp 8
@@ -111,7 +112,7 @@ python pretraining_autoencoder.py --data_dir data/MyData --device_num 6 --ae_lea
 Run the `train_scMILD.py` script to train the scMILD model:
 
 ```bash
-python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --student_batch_size 256 --teacher_learning_rate 1e-3 --student_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
+python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --cell_batch_size 256 --sample_learning_rate 1e-3 --cell_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
 ```
 
 This script trains the scMILD model using the pretrained autoencoder. The trained scMILD model and evaluation results will be saved in the `results` directory.
@@ -124,13 +125,13 @@ This script trains the scMILD model using the pretrained autoencoder. The traine
 ```bash
 python train_scMILD.py [--data_dir DATA_DIR] [--dataset DATASET] 
                        [--device_num DEVICE_NUM] [--data_dim DATA_DIM]
-                       [--mil_latent_dim MIL_LATENT_DIM] [--student_batch_size STUDENT_BATCH_SIZE]
-                       [--teacher_learning_rate TEACHER_LEARNING_RATE]
-                       [--student_learning_rate STUDENT_LEARNING_RATE]
+                       [--mil_latent_dim MIL_LATENT_DIM] [--cell_batch_size cell_BATCH_SIZE]
+                       [--sample_learning_rate SAMPLE_LEARNING_RATE]
+                       [--cell_learning_rate CELL_LEARNING_RATE]
                        [--encoder_learning_rate ENCODER_LEARNING_RATE]
                        [--scMILD_epoch SCMILD_EPOCH] [--scMILD_neg_weight SCMILD_NEG_WEIGHT]
                        [--scMILD_stuOpt SCMILD_STUOPT] [--scMILD_patience SCMILD_PATIENCE]
-                       [--add_suffix ADD_SUFFIX] [--n_exp N_EXP] [--exp EXP]
+                       [--add_suffix ADD_SUFFIX] [--n_exp N_EXP] [--exp EXP] [--gmm GMM] [--op_lambda OP_LAMBDA]
 ```
 
 **Arguments**
@@ -139,27 +140,29 @@ python train_scMILD.py [--data_dir DATA_DIR] [--dataset DATASET]
 - `--device_num`: CUDA device number (default: 6)
 - `--data_dim`: Data dimension (default: 2000)
 - `--mil_latent_dim`: Latent dimension for MIL (default: 64)
-- `--student_batch_size`: Batch size for student (default: 256)
-- `--teacher_learning_rate`: Learning rate for teacher (default: 1e-3)
-- `--student_learning_rate`: Learning rate for student (default: 1e-3)
+- `--cell_batch_size`: Batch size for cell (default: 256)
+- `--sample_learning_rate`: Learning rate for sample (default: 1e-3)
+- `--cell_learning_rate`: Learning rate for cell (default: 1e-3)
 - `--encoder_learning_rate`: Learning rate for encoder (default: 1e-3)
 - `--scMILD_epoch`: Number of epochs for scMILD (default: 500)
 - `--scMILD_neg_weight`: Negative weight for scMILD (default: 0.3)
-- `--scMILD_stuOpt`: Student optimization period (default: 3)
+- `--scMILD_stuOpt`: cell optimization period (default: 3)
 - `--scMILD_patience`: Patience for early stopping (default: 15)
 - `--add_suffix`: Suffix for output files (default: "reported")
 - `--n_exp`: Number of experiments (default: 8)
 - `--exp`: Experiment number (if None, all experiments will be run) (default: None)
+- `--gmm`: Use GMM (default: True)
+- `--op_lambda`: Lambda for orthogonal projection loss (default: 0.5)
 
 **Example**
 Run all experiments:
 ```bash
-python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --student_batch_size 256 --teacher_learning_rate 1e-3 --student_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
+python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --cel_batch_size 256 --sample_learning_rate 1e-3 --cel_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
 ```
 
 Run a single experiment (e.g., experiment 3):
 ```bash
-python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --student_batch_size 256 --teacher_learning_rate 1e-3 --student_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8 --exp 3
+python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --cel_batch_size 256 --sample_learning_rate 1e-3 --cell_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8 --exp 3
 ```
 
 # Contact
