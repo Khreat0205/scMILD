@@ -15,4 +15,12 @@ events.out.tfevents.*
 *.pdf
 *.rds
 *.RDS
+data/
+results/
+downstream/
+runs/
+cmd_PBMC2.*
+run_scMILD_*
+*.ipynb
+*.log
 !requirements.txt

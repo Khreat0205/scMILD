@@ -109,7 +109,8 @@ def optimizer_ae(base_path, exp, device, data_dim, ae_latent_dim, ae_hidden_laye
     ################################## Load Dataset - Instance ###############
     train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
     
-    train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
+    # train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=False, drop_last=False)
+    train_dl = DataLoader(train_dataset, batch_size=ae_batch_size, shuffle=True, drop_last=False)
     val_dl = DataLoader(val_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     test_dl = DataLoader(test_dataset, batch_size=round(ae_batch_size/2), shuffle=False, drop_last=False)
     del train_dataset, val_dataset, test_dataset

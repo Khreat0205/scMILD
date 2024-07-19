@@ -14,7 +14,7 @@ from src.dataset import InstanceDataset
 import pickle
 from sklearn.preprocessing import LabelEncoder
 from scipy.sparse import issparse
-
+torch.set_num_threads(12)
 
 data_dir = "data/NS/"
 

@@ -27,9 +27,9 @@ test_obj@meta.data$cell_score_minmax
 
 test_obj@meta.data$subgroup = factor(ifelse(test_obj@meta.data$cell_score_minmax > 0.5, "Positive","Negative"), levels=c("Negative","Positive"))
 test_obj@meta.data$disease_association = ifelse(test_obj$disease_cov == "COVID-19", 
-                                                ifelse(test_obj$subgroup == "Positive", "COVID-19 Positive", "COVID-19 Negative"),"Normal") 
+                                                ifelse(test_obj$subgroup == "Positive", "Infection-associated", "Infection-independent"),"Normal") 
 
-test_obj@meta.data$disease_association = factor(test_obj@meta.data$disease_association,levels = c("Normal","COVID-19 Negative","COVID-19 Positive"))
+test_obj@meta.data$disease_association = factor(test_obj@meta.data$disease_association,levels = c("Normal","Infection-independent","Infection-associated"))
 feat_SARS = rownames(test_obj)[grep("^SARSCoV2-",rownames(test_obj))]
 test_obj = MetaFeature(test_obj,features = feat_SARS,meta.name = "Meta-SARSCoV2",slot = "scale.data")
 
@@ -42,7 +42,7 @@ text_theme = theme(
   axis.title = element_text(size = unit(10, "pt")),
   legend.text = element_text(size = unit(8, "pt")))#  +coord_fixed(ratio = 1)
 
-trimmedPlot = function(p,filename){
+trimmedPlot = function(p,filename,res_dir= res_dir){
   p_legend = cowplot::get_legend(p)
   p = p+ ggtitle("") +text_theme
   
@@ -60,7 +60,7 @@ trimmedPlot(p_ct,"UMAP_exp2_celltype.pdf")
 p_score =  FeaturePlot(test_obj,"cell_score_minmax") # + ggtitle("")+ text_theme +coord_fixed(ratio = 1) #Cell attention score
 trimmedPlot(p_score,"UMAP_exp2_cell_attn_score.pdf")
 
-p_disease = DimPlot(test_obj,group.by="disease_cov",cols=c("#0070C0","#FF4136")) + ggtitle("")  # +coord_fixed(ratio = 1)# Sample phenotype
+p_disease = DimPlot(test_obj,group.by="disease_cov",cols=c("#009E73", "#0072B2")) + ggtitle("")  # +coord_fixed(ratio = 1)# Sample phenotype
 trimmedPlot(p_disease,"UMAP_exp2_sample_phenotype.pdf")
 
 p_subgroup = DimPlot(test_obj,group.by = "subgroup",cols=c("#00FFFF","#FF00FF")) + ggtitle("")  #+coord_fixed(ratio = 1)# Cell subgroup
@@ -79,9 +79,9 @@ p_stack = ggplot(test_obj@meta.data, aes(x = ct_cov, fill = subgroup)) +
   geom_bar(position = "stack") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+scale_fill_manual(values = c("#00FFFF","#FF00FF"))+ labs(fill='Cell subgroup')+xlab("Cell type")
 
 p_fill_bag = ggplot(test_obj@meta.data, aes(x = ct_cov, fill = disease_cov)) +
-  geom_bar(position = "fill")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ theme(legend.position = "none") +scale_fill_manual(values = c("#0070C0","#FF4136"))+xlab("Cell type") + ylab('fraction')
+  geom_bar(position = "fill")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ theme(legend.position = "none") +scale_fill_manual(values = c("#009E73", "#0072B2"))+xlab("Cell type") + ylab('fraction')
 p_stack_bag = ggplot(test_obj@meta.data, aes(x = ct_cov, fill =disease_cov,legend.title="asdas")) +
-  geom_bar(position = "stack") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ scale_fill_manual(values = c("#0070C0","#FF4136")) + labs(fill='Sample phenotype')+xlab("Cell type")
+  geom_bar(position = "stack") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+ scale_fill_manual(values = c("#009E73", "#0072B2")) + labs(fill='Sample phenotype')+xlab("Cell type")
 
 p_fill_asso = ggplot(test_obj@meta.data, aes(x = ct_cov, fill = disease_association)) +
   geom_bar(position = "fill")+ 
@@ -96,7 +96,6 @@ p_stack_asso = ggplot(test_obj@meta.data, aes(x = ct_cov, fill =disease_associat
   labs(fill='Disease-association group')+xlab("")+ylab("Count")+text_theme
 
 ggexport(p_fill_asso+p_stack_asso,filename = file.path(res_dir,"Bar_exp2_asso_celltype_counts.pdf"),height = 5, width=9 ,res=450)
-
 ggsave(plot = (p_fill_bag + p_stack_bag),filename =  file.path(res_dir,"Bar_exp2_bag_celltype_counts.pdf"),device = 'pdf',width=8, height=5,dpi = 450)
 ggsave(plot = (p_fill + p_stack) ,filename =  file.path(res_dir,"Bar_exp2_subgroup_celltype_counts.pdf"),device = 'pdf',width=8, height=5,dpi = 450)
 
@@ -120,15 +119,18 @@ subsetMarkers = function(obj, idents,cut.padj = NULL, logfc.threshold = NULL, ty
   subset_obj = subset(obj, idents = idents)
   # subset_obj = subset(subset_obj,disease_cov == "COVID-19")
   print(subset_obj)
+  # if(type=="Positive"){
+  #   Idents(subset_obj) = "subgroup"
+  #   disease_markers_subset = FindMarkers(subset_obj ,ident.1 = "Positive",ident.2 = "Negative",logfc.threshold = logfc.threshold,only.pos = T)
   if(type=="Positive"){
-    Idents(subset_obj) = "subgroup"
-    disease_markers_subset = FindMarkers(subset_obj ,ident.1 = "Positive",ident.2 = "Negative",logfc.threshold = logfc.threshold,only.pos = T)
+    Idents(subset_obj) = "disease_association"
+    disease_markers_subset = FindMarkers(subset_obj ,ident.1 = "Infection-associated",ident.2 = "Infection-independent",logfc.threshold = logfc.threshold,only.pos = T)
   } else if(type == "Disease"){
     Idents(subset_obj) = "disease_cov"
     disease_markers_subset = FindMarkers(subset_obj ,ident.1 = "COVID-19",ident.2 = "normal",logfc.threshold = logfc.threshold,only.pos = T)
   } else if(type == "Subtype"){
     Idents(subset_obj) = "disease_association"
-    disease_markers_subset = FindMarkers(subset_obj,ident.1="COVID-19 Positive",ident.2="Normal",logfc.threshold = logfc.threshold,only.pos = T)
+    disease_markers_subset = FindMarkers(subset_obj,ident.1="Infection-associated",ident.2="Normal",logfc.threshold = logfc.threshold,only.pos = T)
   }
   
   if(!is.null(cut.padj)){
@@ -147,18 +149,19 @@ disease_markers_scrt = subsetMarkers(test_obj, idents = "Secretory Cells",cut.pa
 disease_markers_devcil = subsetMarkers(test_obj, idents = "Developing Ciliated Cells",cut.padj = 0.01,type ="Disease")
 
 dag_markers_scrt = subsetMarkers(test_obj, idents = "Secretory Cells",cut.padj = 0.01,type ="Subtype")
-
 dag_markers_devcil = subsetMarkers(test_obj, idents = "Developing Ciliated Cells",cut.padj = 0.01,type ="Subtype")
-
 dag_markers_cil = subsetMarkers(test_obj, idents = "Ciliated Cells",cut.padj = 0.01,type ="Subtype")
+
 positive_markers_devcil = subsetMarkers(test_obj, idents = "Developing Ciliated Cells",cut.padj = 0.01)
 positive_markers_scrt = subsetMarkers(test_obj, idents = "Secretory Cells",cut.padj = 0.01)
 
-p_dev_cil_top35= DotPlot(subset(test_obj,idents = "Developing Ciliated Cells" ),features = rownames(positive_markers_devcil)[1:35],group.by = "disease_association") +RotatedAxis()+ylab("")+xlab("")
-p_dev_cil_top35
+# p_dev_cil_top35= DotPlot(subset(test_obj,idents = "Developing Ciliated Cells" ),features = rownames(positive_markers_devcil)[1:35],group.by = "disease_association") +RotatedAxis()+ylab("")+xlab("")
+p_dev_cil_top35 = DotPlot(subset(test_obj,idents = "Developing Ciliated Cells", disease_cov == "COVID-19" ),features = rownames(positive_markers_devcil)[1:35],group.by = "disease_association") +RotatedAxis()+ylab("")+xlab("")
+p_dev_cil_top20 = DotPlot(subset(test_obj,idents = "Developing Ciliated Cells", disease_cov == "COVID-19" ),features = rownames(positive_markers_devcil)[1:20],group.by = "disease_association") +RotatedAxis()+ylab("")+xlab("")
+
 ggsave(plot =p_dev_cil_top35 ,filename =  file.path(res_dir,"Dot_DEG35_Dev_Ciliated.pdf"),device = 'pdf',width=14, height=4,dpi = 450)
-positive_markers_devcil
-dag_markers_cil
+ggsave(plot =p_dev_cil_top20,filename =  file.path(res_dir,"Dot_DEG20_Dev_Ciliated.pdf"),device = 'pdf',width=10, height=4,dpi = 450)
+
 fwrite(disease_markers_cil,file = file.path(res_dir,"Table_DEG_Ciliated_phenotype.csv"),sep=",",row.names = T)
 fwrite(dag_markers_cil,file = file.path(res_dir,"Table_DEG_Ciliated_model_guided.csv"),sep=",",row.names = T)
 fwrite(positive_markers_devcil,file = file.path(res_dir,"Table_DEG_DevelopingCiliated.csv"),sep=",",row.names = T)
@@ -173,9 +176,9 @@ writeLines(setdiff_disease_cil,con = file(file.path(res_dir,"DEG_Ciliated_only_p
 
 cil_sars= c(setdiff_positive_cil[grepl("SARSCoV2",setdiff_positive_cil)])
 vln_cil_sars = VlnPlot(subset(test_obj,idents = "Ciliated Cells"),cil_sars,group.by = "disease_association",alpha=0,cols = c("#90CAF9", "#FFCC80", "#E53935")) 
-class(vln_cil_sars)
 
-ggsave(plot =vln_cil_sars ,filename =  file.path(res_dir,"Vln_SARSCoV2_Ciliated.pdf"),device = 'pdf',width=6, height=5,dpi = 450)
+
+ggsave(plot =vln_cil_sars ,filename =  file.path(res_dir,"Vln_SARSCoV2_Ciliated.pdf"),device = 'pdf',width=4, height=5,dpi = 450)
 
 
 library(ggvenn)

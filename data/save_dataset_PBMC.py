@@ -16,17 +16,17 @@ from sklearn.preprocessing import LabelEncoder
 from scipy.sparse import issparse
 
 
-data_dir = "data/PBMC/"
+data_dir = "data/PBMC"
 print("Read h5ad file")
 adata = sc.read_h5ad(f'{data_dir}/su_2020_processed.h5ad')
-sc.pp.filter_genes(adata, min_cells=5)
+# sc.pp.filter_genes(adata, min_cells=5)
 adata_raw = adata.copy()
 sc.pp.normalize_total(adata, target_sum=1e4)
 print("Preprocessing Complete!")
 print(adata.shape)
 
 sc.pp.log1p(adata)
-sc.pp.highly_variable_genes(adata, n_top_genes=2000)
+sc.pp.highly_variable_genes(adata, n_top_genes=3000)
 print("HVGs selection")
 adata = adata_raw[:, adata.var.highly_variable]
 print(adata.shape)
@@ -108,13 +108,13 @@ def load_and_save_datasets_adata(base_path, exps, device, adata):
 
         train_dataset, label_encoder = load_mil_dataset_from_adata(adata=train_data, device=device, is_train=True, label_encoder=label_encoder)
         save_preprocessors(base_path, label_encoder, exp)
-        torch.save(train_dataset, f"{base_path}/train_dataset_exp{exp}.pt")
+        torch.save(train_dataset, f"{base_path}2/train_dataset_exp{exp}.pt")
 
         val_dataset, _ = load_mil_dataset_from_adata(adata=val_data, device=device, is_train=False, label_encoder=label_encoder)
-        torch.save(val_dataset, f"{base_path}/val_dataset_exp{exp}.pt")
+        torch.save(val_dataset, f"{base_path}2/val_dataset_exp{exp}.pt")
         
         test_dataset, _ = load_mil_dataset_from_adata(adata=test_data, device=device, is_train=False, label_encoder=label_encoder)
-        torch.save(test_dataset, f"{base_path}/test_dataset_exp{exp}.pt")
+        torch.save(test_dataset, f"{base_path}2/test_dataset_exp{exp}.pt")
         print(f'Experiment {exp} dataset saved')
         del train_dataset, label_encoder, val_dataset, test_dataset, train_data, val_data, test_data
 

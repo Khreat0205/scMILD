@@ -22,14 +22,15 @@ whole_meta_data = fread("../data/UC/all.meta2.txt")[-1,]
 whole_meta_data = whole_meta_data[whole_meta_data$NAME %in% colnames(whole_data),]
 whole_obj = CreateSeuratObject(whole_data,meta.data = whole_meta_data,names.field = "NAME")
 # trqwe::mcsaveRDS(whole_obj,"UC/whole_obj.RDS")
-test_meta = fread(sprintf("%s/obs_2.csv", base_dir))
+test_meta = fread(sprintf("%s/obs_3.csv", base_dir))
+
 test_obj = subset(whole_obj,cells = test_meta$cell.names)
-cell_scores = fread(sprintf("%s/cell_score_2.csv",base_dir))
+cell_scores = fread(sprintf("%s/cell_score_3.csv",base_dir))
 
 # prop.table(table(cell_scores$bag_labels, cell_scores$cell_score_teacher_minmax > 0.5),margin = 1)
 
-test_meta = cbind(test_meta[,1], cell_scores)
-test_meta
+test_meta = cbind(test_meta[,2], cell_scores)
+
 # test_meta = cbind(test_meta[,-1], cell_scores)
 colnames(test_meta)[1]= "NAME"
 
@@ -41,7 +42,9 @@ rownames(test_meta) = test_meta$NAME
 test_meta
 test_obj@meta.data = test_meta
 colnames(test_obj)
+test_meta
 
+Idents(test_obj) = "NAME"
 test_obj = FindVariableFeatures(test_obj,assay = "RNA")
 
 test_obj = NormalizeData(test_obj)
@@ -66,8 +69,8 @@ test_obj@meta.data$Health = factor(test_obj@meta.data$Health,levels = c("Healthy
 # subgroup_counts = test_obj@meta.data %>% group_by(Health) %>% count(subgroup)
 # test_obj@meta.data %>% count(subgroup)
 # test_obj = trqwe::mcreadRDS(file=sprintf("%s/test_seurat.RDS",base_dir))
-test_obj$cell_score_minmax = test_obj$cell_score_teacher_minmax
-test_obj$cell_score_teacher_minmax = NULL
+#test_obj$cell_score_minmax = test_obj$cell_score_teacher_minmax
+#test_obj$cell_score_teacher_minmax = NULL
 
 ggdensity(test_obj@meta.data,x = "cell_score_minmax",color = "Health",fill="Health",add="mean", rug=TRUE)
 ggdensity(test_obj@meta.data,x = "cell_score_minmax",add="mean", rug=TRUE)
@@ -76,11 +79,12 @@ test_obj[,test_obj@meta.data$Health %in% c("Healthy","Inflamed")]
 
 ################################ grouping 
 test_obj@meta.data$subgroup = factor(ifelse(test_obj@meta.data$cell_score_minmax > 0.5, "Positive","Negative"), levels=c("Negative","Positive"))
+
 test_obj@meta.data$disease_association = ifelse(test_obj$Health == "Inflamed", 
                                                 ifelse(test_obj$subgroup == "Positive", "Inflamed Positive", "Inflamed Negative"),"Healthy") 
 test_obj@meta.data$disease_association = factor(test_obj@meta.data$disease_association,levels = c("Healthy","Inflamed Negative","Inflamed Positive"))
 
-table(test_obj@meta.data$Health, test_obj@meta.data$subgroup_0.5)
+
 table(test_obj@meta.data$Health, test_obj@meta.data$subgroup)
 table(test_obj@meta.data$cell_type, test_obj@meta.data$disease_association)
 ################################ UMAP
@@ -89,19 +93,20 @@ color_subgroup = c("#00FFFF","#FF00FF")
 color_disease_asso = c("#2ECC40", "#9ACD32", "#FF851B")
 
 p_ct  = DimPlot(test_obj,group.by = "Cluster",label = F) + ggtitle("")
-p_disease = DimPlot(test_obj,group.by="Healthy",cols=color_disease)  + ggtitle("")
+p_disease = DimPlot(test_obj,group.by="Health",cols=color_disease)  + ggtitle("")
 p_score =  FeaturePlot(test_obj,"cell_score_minmax",order = T) + ggtitle("")
 p_subgroup = DimPlot(test_obj,group.by = "subgroup",cols=color_subgroup) + ggtitle("")
 p_disease_association = DimPlot(test_obj, group.by = "disease_association", cols = c("#2ECC40", "#9ACD32", "#FF851B"),order = T) + ggtitle("")
 
 (p_ct | p_disease) / (p_score | p_subgroup)
-res_dir = c("downstream_scMILD/uc_inflamed")
+
+res_dir = c("UC_0619")
 # dir.create(res_dir)
-ggsave(plot = p_ct,filename =  file.path(res_dir,"UMAP_exp2_celltype.pdf"),device = 'pdf',width=10, height=8,dpi = 450)
-ggsave(plot = p_score,filename =  file.path(res_dir,"UMAP_exp2_cell_attn_score.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
-ggsave(plot = p_disease,filename =  file.path(res_dir,"UMAP_exp2_sample_phenotype.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
-ggsave(plot = p_subgroup,filename =  file.path(res_dir,"UMAP_exp2_cell_subgroup.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
-ggsave(plot = p_disease_association,filename =  file.path(res_dir,"UMAP_exp2_disease_association.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
+ggsave(plot = p_ct,filename =  file.path(res_dir,"UMAP_exp3_celltype.pdf"),device = 'pdf',width=10, height=8,dpi = 450)
+ggsave(plot = p_score,filename =  file.path(res_dir,"UMAP_exp3_cell_attn_score.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
+ggsave(plot = p_disease,filename =  file.path(res_dir,"UMAP_exp3_sample_phenotype.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
+ggsave(plot = p_subgroup,filename =  file.path(res_dir,"UMAP_exp3_cell_subgroup.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
+ggsave(plot = p_disease_association,filename =  file.path(res_dir,"UMAP_exp3_disease_association.pdf"),device = 'pdf',width=8, height=8,dpi = 450)
 
 ################################ Bar plot
 library(ggplot2)
@@ -130,9 +135,9 @@ p_stack_asso = ggplot(test_obj@meta.data, aes(x = Cluster, fill =disease_associa
 (p_fill + p_stack) /
   (p_fill_asso+ p_stack_asso)
 
-ggsave(plot = (p_fill_bag + p_stack_bag),filename =  file.path(res_dir,"Bar_exp2_bag_celltype_counts.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
-ggsave(plot = (p_fill + p_stack) ,filename =  file.path(res_dir,"Bar_exp2_subgroup_celltype_counts.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
-ggsave(plot = (p_fill_asso + p_stack_asso) ,filename =  file.path(res_dir,"Bar_exp2_asso_celltype_counts.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
+ggsave(plot = (p_fill_bag + p_stack_bag),filename =  file.path(res_dir,"Bar_exp3_bag_celltype_counts.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
+ggsave(plot = (p_fill + p_stack) ,filename =  file.path(res_dir,"Bar_exp3_subgroup_celltype_counts.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
+ggsave(plot = (p_fill_asso + p_stack_asso) ,filename =  file.path(res_dir,"Bar_exp3_asso_celltype_counts.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
 
 write.csv(table(test_obj@meta.data$Cluster,test_obj@meta.data$Health),file = file.path(res_dir,"CountTable_Cluster_Health.csv"))
 write.csv(table(test_obj@meta.data$Cluster,test_obj@meta.data$subgroup),file = file.path(res_dir,"CountTable_Cluster_subgroup.csv"))
@@ -154,11 +159,11 @@ color_celltype <- hue_pal()(length(identities))
 
 names(color_celltype) = sort(identities,decreasing = F)
 p_box= ggboxplot(test_obj@meta.data, x="Cluster", y="cell_score_minmax", fill='Cluster',facet.by = "Health",order = cluster_score$Cluster,palette = color_celltype,xlab = "Cell type", ylab="Cell attention score")+ggpubr::rotate_x_text(angle=90) +NoLegend() 
-ggsave(plot = p_box ,filename =  file.path(res_dir,"Box_exp2_attn_score_celltype.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
+ggsave(plot = p_box ,filename =  file.path(res_dir,"Box_exp3_attn_score_celltype.pdf"),device = 'pdf',width=12, height=8,dpi = 450)
 
 ################################ Unseen class
 
-meta_unseen = fread(sprintf("%s/unseen_obs_2.csv", base_dir))
+meta_unseen = fread(sprintf("%s/unseen_obs_3.csv", base_dir))
 
 
 unseen_obj = subset(whole_obj,cells = meta_unseen$cell.names)

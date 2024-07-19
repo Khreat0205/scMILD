@@ -14,7 +14,7 @@ from src.dataset import InstanceDataset
 import pickle
 from sklearn.preprocessing import LabelEncoder
 from scipy.sparse import issparse
-
+torch.set_num_threads(8)
 
 data_dir = "data/Lupus/"
 
@@ -35,7 +35,7 @@ adata.obs['disease_numeric'] = adata.obs['disease_cov'].map(mapping)
 adata.obs['sample_id_numeric'], _ = pd.factorize(adata.obs['ind_cov'])
 
 
-device_num = 3
+device_num = 7
 device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
 
 print("INFO: Using device: {}".format(device))
