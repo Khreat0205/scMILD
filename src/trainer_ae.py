@@ -6,7 +6,7 @@ import copy
 import pandas
 from torch.utils.data import DataLoader
 from src.utils import load_dataset_and_preprocessors, set_random_seed
-from src.model import AENB
+from src.model import AENB, VQ_AENB
 
 def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
     # adapted from https://github.com/uhlerlab/STACI/blob/master/gae/gae/optimizer.py
@@ -18,27 +18,51 @@ def negative_binomial_loss(y_pred, theta, y_true, eps=1e-10):
 def _train_or_test(model=None, dataloader=None, optimizer=None, device='cuda'):
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
+    
+    # Check if model is VQ-AENB
+    is_vq_model = isinstance(model, VQ_AENB)
 
     start = time.time()
     
     n_batches = 0
     
     total_recons_loss = 0
+    total_commitment_loss = 0 if is_vq_model else None
+    
     for i, (data, _, instance_labels) in enumerate(dataloader):
         input_data = data.to(device)
         target = instance_labels.to(device)
         grad_req = torch.enable_grad() if is_train else torch.no_grad()
         with grad_req:
-            mu_recon, theta_recon = model(input_data, target, is_train=is_train)
-            recons_loss = negative_binomial_loss(mu_recon,theta_recon, input_data)
-           
+            # Handle VQ-AENB vs AENB forward pass
+            if is_vq_model:
+                forward_output = model(input_data, target, is_train=is_train)
+                if is_train:
+                    mu_recon, theta_recon, commitment_loss = forward_output
+                    total_commitment_loss += commitment_loss.item()
+                else:
+                    mu_recon, theta_recon = forward_output
+                    commitment_loss = 0
+            else:
+                mu_recon, theta_recon = model(input_data, target, is_train=is_train)
+                commitment_loss = 0
+            
+            recons_loss = negative_binomial_loss(mu_recon, theta_recon, input_data)
+            
             # Accumulate loss values
             n_batches += 1
             
             total_recons_loss += recons_loss.item()
+            
             if is_train:
+                # Combine losses for VQ-AENB
+                if is_vq_model:
+                    total_loss = recons_loss + commitment_loss
+                else:
+                    total_loss = recons_loss
+                    
                 optimizer.zero_grad()
-                recons_loss.backward()
+                total_loss.backward()
                 optimizer.step()
 
             del input_data
@@ -50,6 +74,11 @@ def _train_or_test(model=None, dataloader=None, optimizer=None, device='cuda'):
     avg_recons_loss = total_recons_loss / n_batches
     print(f'\tTime: {end - start:.2f}s')
     print(f'\tReconstruction Loss: {avg_recons_loss:.4f}')
+    
+    if is_vq_model and is_train:
+        avg_commitment_loss = total_commitment_loss / n_batches
+        print(f'\tCommitment Loss: {avg_commitment_loss:.4f}')
+        print(f'\tTotal Loss: {avg_recons_loss + avg_commitment_loss:.4f}')
     
     return avg_recons_loss
 
@@ -105,7 +134,9 @@ def train_ae(ae, train_dl, val_dl, optimizer, device, n_epochs=25, patience= 10,
     return ae
 
 
-def optimizer_ae(base_path, exp, device, data_dim, ae_latent_dim, ae_hidden_layers, ae_batch_size, ae_learning_rate, ae_epochs, ae_patience, target_dir):
+def optimizer_ae(base_path, exp, device, data_dim, ae_latent_dim, ae_hidden_layers, ae_batch_size,
+                 ae_learning_rate, ae_epochs, ae_patience, target_dir, model_type='AENB',
+                 vq_num_codes=256, vq_commitment_weight=0.25):
     ################################## Load Dataset - Instance ###############
     train_dataset, val_dataset, test_dataset, label_encoder = load_dataset_and_preprocessors(base_path, exp, device)
     
@@ -117,15 +148,39 @@ def optimizer_ae(base_path, exp, device, data_dim, ae_latent_dim, ae_hidden_laye
     set_random_seed(exp)
 
     ################################## Set Model ####################
-    ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim, 
-                        device=device, hidden_layers=ae_hidden_layers, 
-                        activation_function=nn.Sigmoid).to(device)
+    if model_type == 'VQ-AENB':
+        ae = VQ_AENB(input_dim=data_dim, latent_dim=ae_latent_dim,
+                     device=device, hidden_layers=ae_hidden_layers,
+                     num_codes=vq_num_codes, commitment_weight=vq_commitment_weight,
+                     activation_function=nn.Sigmoid).to(device)
+        
+        # Initialize codebook with training data
+        print(f"Initializing VQ-AENB codebook with {vq_num_codes} codes...")
+        ae.init_codebook(train_dl, method="kmeans", num_samples=min(10000, len(train_dl.dataset)))
+        
+        model_save_name = f"vq_aenb_{exp}.pth"
+        csv_name = f"vq_aenb_test.csv"
+    else:
+        ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim,
+                  device=device, hidden_layers=ae_hidden_layers,
+                  activation_function=nn.Sigmoid).to(device)
+        
+        model_save_name = f"aenb_{exp}.pth"
+        csv_name = f"aenb_test.csv"
 
     ae_optimizer = torch.optim.Adam(ae.parameters(), lr=ae_learning_rate)
 
     ################################## Training AE ####################
-    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs, patience= ae_patience, model_save_path=f"{target_dir}/aenb_{exp}.pth")
+    ae = train_ae(ae, train_dl, val_dl, ae_optimizer, device, n_epochs=ae_epochs,
+                  patience=ae_patience, model_save_path=f"{target_dir}/{model_save_name}")
 
-    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device, csv_path=f"{target_dir}/aenb_test.csv")
+    test_recon = test(model=ae, optimizer=None, dataloader=test_dl, device=device,
+                      csv_path=f"{target_dir}/{csv_name}")
+    
+    # Print codebook usage statistics for VQ-AENB
+    if model_type == 'VQ-AENB':
+        codebook_stats = ae.get_codebook_usage()
+        print(f"Codebook usage: {codebook_stats['num_active']}/{codebook_stats['total_codes']} codes active")
+    
     del train_dl, val_dl, test_dl, ae, ae_optimizer, test_recon
     torch.cuda.empty_cache()
