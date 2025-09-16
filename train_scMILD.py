@@ -11,10 +11,14 @@ def train_scMILD(data_dir="data/MyData", dataset="MyData", device_num=6, data_di
                  n_exp=8, exp=None, opl= False, use_loss = False, op_lambda=0.5, train_stud=True, op_gamma=0.5, epoch_warmup=0,opl_warmup=0, opl_comps=[2]):
     ae_dir = f'{data_dir}/AE/'
 
-    ae_latent_dim, ae_hidden_layers = load_ae_hyperparameters(ae_dir)
+    # Load hyperparameters including model type information
+    ae_latent_dim, ae_hidden_layers, model_type, vq_num_codes, vq_commitment_weight = load_ae_hyperparameters(ae_dir)
 
     device = torch.device(f'cuda:{device_num}' if torch.cuda.is_available() else 'cpu')
-    print("INFO: Using device: {}".format(device))
+    print(f"INFO: Using device: {device}")
+    print(f"INFO: Detected pretrained model type: {model_type}")
+    if model_type == 'VQ-AENB':
+        print(f"INFO: VQ-AENB configuration - num_codes: {vq_num_codes}, commitment_weight: {vq_commitment_weight}")
 
     if exp is None:
         exps = range(1, n_exp + 1)
@@ -29,8 +33,14 @@ def train_scMILD(data_dir="data/MyData", dataset="MyData", device_num=6, data_di
         bag_train_dl, bag_val_dl, bag_test_dl = load_dataloaders(bag_train, bag_val, bag_test)
         print("loaded all dataset")
         del(bag_train, bag_val, bag_test)
-        model_sample, model_cell, model_encoder, optimizer_sample, optimizer_cell, optimizer_encoder = load_model_and_optimizer(data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim, sample_learning_rate, cell_learning_rate, encoder_learning_rate)
-        print("loaded all model and optimizer")
+        
+        # Pass model type and VQ parameters to load_model_and_optimizer
+        model_sample, model_cell, model_encoder, optimizer_sample, optimizer_cell, optimizer_encoder = load_model_and_optimizer(
+            data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim,
+            sample_learning_rate, cell_learning_rate, encoder_learning_rate,
+            model_type=model_type, vq_num_codes=vq_num_codes, vq_commitment_weight=vq_commitment_weight
+        )
+        print(f"loaded all model and optimizer (using {model_type} encoder)")
         
         exp_writer = None
         test_optimizer= Optimizer(exp, model_sample, model_cell, model_encoder, 

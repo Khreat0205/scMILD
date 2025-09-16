@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from sklearn.preprocessing import LabelEncoder
 from scipy.sparse import issparse
 from src.dataset import MilDataset, InstanceDataset, collate, update_instance_labels_with_bag_labels
-from src.model import AENB, AttentionModule, TeacherBranch, StudentBranch
+from src.model import AENB, VQ_AENB, AttentionModule, TeacherBranch, StudentBranch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import WeightedRandomSampler
 
@@ -127,10 +127,16 @@ def set_random_seed(exp):
 def load_ae_hyperparameters(ae_dir):
     hyperparameter_file_path = os.path.join(ae_dir, f'hyperparameters_pretraining_autoencoder.json')
     with open(hyperparameter_file_path, 'r') as file:
-        loaded_args_dict = json.load(file)       
+        loaded_args_dict = json.load(file)
         
     loaded_args = argparse.Namespace(**loaded_args_dict)
-    return loaded_args.ae_latent_dim, loaded_args.ae_hidden_layers
+    
+    # Return basic parameters plus model type info if available
+    model_type = getattr(loaded_args, 'model_type', 'AENB')  # Default to AENB for backward compatibility
+    vq_num_codes = getattr(loaded_args, 'vq_num_codes', 256)
+    vq_commitment_weight = getattr(loaded_args, 'vq_commitment_weight', 0.25)
+    
+    return loaded_args.ae_latent_dim, loaded_args.ae_hidden_layers, model_type, vq_num_codes, vq_commitment_weight
 
 def load_and_process_datasets(data_dir, exp, device, student_batch_size):
     train_dataset, val_dataset, test_dataset, _ = load_dataset_and_preprocessors(data_dir, exp, device=torch.device('cpu'))
@@ -166,25 +172,62 @@ def load_dataloaders(bag_train, bag_val, bag_test):
     return bag_train_dl, bag_val_dl, bag_test_dl
 
 
-def load_model_and_optimizer(data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim, teacher_learning_rate, student_learning_rate, encoder_learning_rate):
-    ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim, 
-                            device=device, hidden_layers=ae_hidden_layers, 
-                            activation_function=nn.Sigmoid).to(device)
-    ae.load_state_dict(torch.load(f"{ae_dir}/aenb_{exp}.pth"))
+def load_model_and_optimizer(data_dim, ae_latent_dim, ae_hidden_layers, device, ae_dir, exp, mil_latent_dim,
+                            teacher_learning_rate, student_learning_rate, encoder_learning_rate,
+                            model_type='AENB', vq_num_codes=256, vq_commitment_weight=0.25):
+    """
+    Load pretrained autoencoder and create MIL models and optimizers.
+    Automatically detects model type from saved file or uses provided model_type.
+    """
+    
+    # Try to load VQ-AENB first if model_type suggests it
+    if model_type == 'VQ-AENB':
+        vq_model_path = f"{ae_dir}/vq_aenb_{exp}.pth"
+        if os.path.exists(vq_model_path):
+            ae = VQ_AENB(input_dim=data_dim, latent_dim=ae_latent_dim,
+                        device=device, hidden_layers=ae_hidden_layers,
+                        num_codes=vq_num_codes, commitment_weight=vq_commitment_weight,
+                        activation_function=nn.Sigmoid).to(device)
+            ae.load_state_dict(torch.load(vq_model_path, map_location=device))
+            print(f"Loaded VQ-AENB model from {vq_model_path}")
+            model_encoder = ae  # Use the entire VQ-AENB model
+        else:
+            # Fallback to AENB if VQ-AENB file doesn't exist
+            print(f"VQ-AENB model file not found at {vq_model_path}, falling back to AENB")
+            model_type = 'AENB'
+    
+    # Load AENB model (either as primary choice or fallback)
+    if model_type == 'AENB':
+        aenb_model_path = f"{ae_dir}/aenb_{exp}.pth"
+        if os.path.exists(aenb_model_path):
+            ae = AENB(input_dim=data_dim, latent_dim=ae_latent_dim,
+                     device=device, hidden_layers=ae_hidden_layers,
+                     activation_function=nn.Sigmoid).to(device)
+            ae.load_state_dict(torch.load(aenb_model_path, map_location=device))
+            print(f"Loaded AENB model from {aenb_model_path}")
+            model_encoder = ae.features  # Use only the encoder part
+        else:
+            raise FileNotFoundError(f"No model file found at {aenb_model_path}")
     
     encoder_dim = ae_latent_dim
-    model_encoder = ae.features
     attention_module = AttentionModule(L=encoder_dim, D=encoder_dim, K=1).to(device)
-    model_teacher = TeacherBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, 
-                            attention_module=attention_module, num_classes=2, activation_function=nn.Tanh)
+    model_teacher = TeacherBranch(input_dims=encoder_dim, latent_dims=mil_latent_dim,
+                                 attention_module=attention_module, num_classes=2, activation_function=nn.Tanh)
 
-    model_student = StudentBranch(input_dims = encoder_dim, latent_dims=mil_latent_dim, num_classes=2, activation_function=nn.Tanh)
+    model_student = StudentBranch(input_dims=encoder_dim, latent_dims=mil_latent_dim,
+                                 num_classes=2, activation_function=nn.Tanh)
     
     model_teacher.to(device)
     model_student.to(device)
     
     optimizer_teacher = torch.optim.Adam(model_teacher.parameters(), lr=teacher_learning_rate)
     optimizer_student = torch.optim.Adam(model_student.parameters(), lr=student_learning_rate)
-    optimizer_encoder = torch.optim.Adam(model_encoder.parameters(), lr=encoder_learning_rate)
+    
+    # For VQ-AENB, we optimize the entire model; for AENB, just the encoder features
+    if model_type == 'VQ-AENB':
+        # Only optimize the encoder part of VQ-AENB, not the quantizer or decoder
+        optimizer_encoder = torch.optim.Adam(ae.encoder.parameters(), lr=encoder_learning_rate)
+    else:
+        optimizer_encoder = torch.optim.Adam(model_encoder.parameters(), lr=encoder_learning_rate)
     
     return model_teacher, model_student, model_encoder, optimizer_teacher, optimizer_student, optimizer_encoder
