@@ -151,14 +151,30 @@ def load_dataset_and_preprocessors(base_path, exp, device, used_cell_types=False
 
     return train_dataset, val_dataset, test_dataset, label_encoder
 
-def set_random_seed(exp):
+def set_random_seed(exp, enable_cudnn_benchmark=True):
+    """
+    Set random seed for reproducibility.
+    
+    Args:
+        exp: Experiment number for seed
+        enable_cudnn_benchmark: If True, enable cudnn benchmark for better performance (default: True)
+                                Note: This may cause slight non-determinism but improves speed significantly
+    """
     torch.manual_seed(exp)
     torch.cuda.manual_seed(exp)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
     np.random.seed(exp)
     random.seed(exp)
     torch.cuda.manual_seed_all(exp)
+    
+    if enable_cudnn_benchmark:
+        # Enable cudnn benchmark for better performance
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True
+        print("CuDNN benchmark enabled for better GPU utilization (may cause slight non-determinism)")
+    else:
+        # Strict determinism (slower)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 
@@ -176,25 +192,51 @@ def load_ae_hyperparameters(ae_dir):
     
     return loaded_args.ae_latent_dim, loaded_args.ae_hidden_layers, model_type, vq_num_codes, vq_commitment_weight
    
-def load_and_process_datasets(data_dir, exp, device, student_batch_size, suffix=None):
+def load_and_process_datasets(data_dir, exp, device, student_batch_size, suffix=None, num_workers=None, enable_cudnn_benchmark=True):
+    """
+    Load and process datasets for training.
+    
+    Args:
+        num_workers: Number of workers for DataLoader. If None, automatically determined based on CPU count.
+        enable_cudnn_benchmark: Enable CuDNN benchmark for better GPU utilization
+    """
     train_dataset, val_dataset, test_dataset, _ = load_dataset_and_preprocessors(data_dir, exp, device=torch.device('cpu'), suffix=suffix)
     instance_train_dataset = update_instance_labels_with_bag_labels(train_dataset, device=torch.device('cpu'))
     
-    set_random_seed(exp)
+    set_random_seed(exp, enable_cudnn_benchmark=enable_cudnn_benchmark)
     
     #### add 06 04 _ sampler
     # Calculate weights for each combined label
     label_counts = instance_train_dataset.bag_labels.bincount()
     label_weights = 1.0 / label_counts
     instance_weights = label_weights[instance_train_dataset.bag_labels]
-    # Define your DataLoader
-    num_workers = 1
-    pin_memory = True
-    prefetch_factor_student=4
+    
+    # Optimize DataLoader settings for better GPU utilization
+    if num_workers is None:
+        # Automatically determine optimal num_workers (usually 4-8)
+        import multiprocessing
+        cpu_count = multiprocessing.cpu_count()
+        num_workers = min(8, max(4, cpu_count // 2))  # Use half of CPUs, between 4-8
+    
+    pin_memory = True  # Faster data transfer to GPU
+    prefetch_factor_student = 2  # Prefetch 2 batches per worker
+    persistent_workers = True if num_workers > 0 else False  # Keep workers alive between epochs
+    
+    print(f"DataLoader settings: num_workers={num_workers}, prefetch_factor={prefetch_factor_student}, persistent_workers={persistent_workers}")
+    
     # Create a WeightedRandomSampler
     sampler = WeightedRandomSampler(instance_weights, len(instance_train_dataset))
     
-    instance_train_dl = DataLoader(instance_train_dataset, batch_size=student_batch_size, sampler=sampler, drop_last=False, pin_memory=pin_memory, num_workers=num_workers, prefetch_factor=prefetch_factor_student) 
+    instance_train_dl = DataLoader(
+        instance_train_dataset,
+        batch_size=student_batch_size,
+        sampler=sampler,
+        drop_last=False,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor_student,
+        persistent_workers=persistent_workers
+    )
     
     bag_train = MilDataset(train_dataset.data.to(device), train_dataset.ids.unsqueeze(0).to(device), train_dataset.labels.to(device), train_dataset.instance_labels.to(device))
     bag_val = MilDataset(val_dataset.data.to(device), val_dataset.ids.unsqueeze(0).to(device), val_dataset.labels.to(device), val_dataset.instance_labels.to(device))
@@ -205,11 +247,50 @@ def load_and_process_datasets(data_dir, exp, device, student_batch_size, suffix=
 
 
 
-def load_dataloaders(bag_train, bag_val, bag_test):
-    # bag_train_dl = DataLoader(bag_train,batch_size = 14, shuffle=False, drop_last=False,collate_fn=collate)
-    bag_train_dl = DataLoader(bag_train,batch_size = 28, shuffle=False, drop_last=False,collate_fn=collate)
-    bag_val_dl = DataLoader(bag_val,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
-    bag_test_dl = DataLoader(bag_test,batch_size = 15, shuffle=False, drop_last=False,collate_fn=collate)
+def load_dataloaders(bag_train, bag_val, bag_test, num_workers=4):
+    """
+    Create DataLoaders for bag datasets with optimized settings.
+    
+    Args:
+        num_workers: Number of workers for DataLoader (default: 4)
+    """
+    # Add num_workers and pin_memory for bag dataloaders too
+    pin_memory = torch.cuda.is_available()
+    persistent_workers = True if num_workers > 0 else False
+    
+    bag_train_dl = DataLoader(
+        bag_train,
+        batch_size=28,
+        shuffle=False,
+        drop_last=False,
+        collate_fn=collate,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers
+    )
+    
+    bag_val_dl = DataLoader(
+        bag_val,
+        batch_size=15,
+        shuffle=False,
+        drop_last=False,
+        collate_fn=collate,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers
+    )
+    
+    bag_test_dl = DataLoader(
+        bag_test,
+        batch_size=15,
+        shuffle=False,
+        drop_last=False,
+        collate_fn=collate,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers
+    )
+    
     return bag_train_dl, bag_val_dl, bag_test_dl
 
 
