@@ -53,7 +53,7 @@ scMILD/
 
 ```bash
 # 저장소 클론
-git clone https://github.com/Khreat0205/scMILD.git
+git clone -b Quant_Conditioned https://github.com/Khreat0205/scMILD.git
 cd scMILD
 
 # 환경 설정 (conda 권장)

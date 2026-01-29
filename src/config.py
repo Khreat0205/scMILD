@@ -50,9 +50,20 @@ class PreprocessingConfig:
 
 
 @dataclass
+class SubsetConfig:
+    """데이터 subset 설정 (whole_adata에서 특정 study만 필터링)"""
+    enabled: bool = False
+    column: str = "study"           # subset 기준 컬럼
+    values: List[str] = field(default_factory=list)  # 포함할 값들
+    cache_dir: Optional[str] = None
+    use_cache: bool = True
+
+
+@dataclass
 class DataConfig:
     """데이터 설정"""
-    adata_path: Optional[str] = None
+    whole_adata_path: Optional[str] = None  # 전체 데이터 경로
+    subset: SubsetConfig = field(default_factory=SubsetConfig)
     columns: ColumnsConfig = field(default_factory=ColumnsConfig)
     conditional_embedding: ConditionalEmbeddingConfig = field(default_factory=ConditionalEmbeddingConfig)
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
@@ -168,6 +179,21 @@ class HardwareConfig:
 
 
 @dataclass
+class TuningConfig:
+    """하이퍼파라미터 튜닝 설정"""
+    enabled: bool = False
+    # Search space
+    learning_rate: List[float] = field(default_factory=lambda: [0.0001])
+    encoder_learning_rate: List[float] = field(default_factory=lambda: [0.0005])
+    epochs: List[int] = field(default_factory=lambda: [100])
+    disease_ratio_lambda: List[float] = field(default_factory=lambda: [0.0])
+    # Evaluation
+    metric: str = "auc"  # 최적화 기준 메트릭
+    # Output
+    results_file: str = "tuning_results.csv"
+
+
+@dataclass
 class ScMILDConfig:
     """scMILD 전체 설정"""
     paths: PathsConfig = field(default_factory=PathsConfig)
@@ -178,6 +204,7 @@ class ScMILDConfig:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     hardware: HardwareConfig = field(default_factory=HardwareConfig)
+    tuning: TuningConfig = field(default_factory=TuningConfig)
 
 
 # ============================================================================
@@ -292,8 +319,10 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
     columns = _make_dataclass(ColumnsConfig, data_dict.get("columns"))
     conditional_embedding = _make_dataclass(ConditionalEmbeddingConfig, data_dict.get("conditional_embedding"))
     preprocessing = _make_dataclass(PreprocessingConfig, data_dict.get("preprocessing"))
+    subset = _make_dataclass(SubsetConfig, data_dict.get("subset"))
     data = DataConfig(
-        adata_path=data_dict.get("adata_path"),
+        whole_adata_path=data_dict.get("whole_adata_path"),
+        subset=subset,
         columns=columns,
         conditional_embedding=conditional_embedding,
         preprocessing=preprocessing,
@@ -349,6 +378,7 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
 
     logging_cfg = _make_dataclass(LoggingConfig, d.get("logging"))
     hardware = _make_dataclass(HardwareConfig, d.get("hardware"))
+    tuning = _make_dataclass(TuningConfig, d.get("tuning"))
 
     return ScMILDConfig(
         paths=paths,
@@ -359,6 +389,7 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
         evaluation=evaluation,
         logging=logging_cfg,
         hardware=hardware,
+        tuning=tuning,
     )
 
 

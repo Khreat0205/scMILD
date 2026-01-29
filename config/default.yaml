@@ -22,8 +22,18 @@ paths:
 # 데이터 설정
 # ============================================================================
 data:
-  # AnnData 파일 경로 (dataset별로 override)
-  adata_path: null  # 예: "${paths.data_root}/data/adata_skin3.h5ad"
+  # 전체 AnnData 파일 경로 (pretrain 및 원본 데이터)
+  whole_adata_path: "${paths.data_root}/data/Whole_SCP_PCD_Skin_805k_6k.h5ad"
+
+  # Subset 설정 (MIL 학습용)
+  # enabled: true면 whole_adata에서 subset, false면 whole_adata 전체 사용
+  subset:
+    enabled: false
+    column: "study"           # subset 기준 컬럼
+    values: []                # 포함할 값들 (dataset별 config에서 override)
+    # 캐시 설정
+    cache_dir: "${paths.data_root}/data/cache"
+    use_cache: true           # true면 캐시 있을 시 로드, 없으면 생성 후 저장
 
   # 관측 컬럼명
   columns:
@@ -161,7 +171,26 @@ hardware:
   num_workers: 4
 
 # ============================================================================
-# TODO (Phase 2에서 구현 예정)
+# 하이퍼파라미터 튜닝 설정
+# ============================================================================
+tuning:
+  enabled: false
+
+  # Search space (Grid Search)
+  learning_rate: [0.001, 0.0001]
+  encoder_learning_rate: [0.001, 0.0001]
+  epochs: [100, 50]
+  disease_ratio_lambda: [0.0, 0.05, 0.1]
+
+  # 최적화 기준 메트릭: "auc" | "accuracy" | "f1_score"
+  metric: "auc"
+
+  # 결과 파일명
+  results_file: "tuning_results.csv"
+
+# ============================================================================
+# TODO (향후 구현 예정)
 # ============================================================================
 # - Repeated Stratified K-Fold 옵션
 # - MLflow/W&B 통합
+# - Optuna 기반 최적화
