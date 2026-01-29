@@ -99,6 +99,9 @@ def create_dataloaders(
                 split_adata.obs[embedding_col].values.astype(int),
                 dtype=torch.long, device=device
             )
+        else:
+            print(f"WARNING: embedding_col '{embedding_col}' not found in adata.obs.columns")
+            print(f"  Available columns: {list(split_adata.obs.columns)[:10]}...")
 
         return data, sample_ids, labels, instance_labels, embedding_ids
 
