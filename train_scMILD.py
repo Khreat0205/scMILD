@@ -7,8 +7,8 @@ from src.optimizer import Optimizer
 
 def train_scMILD(data_dir="data/MyData", dataset="MyData", device_num=6, data_dim=2000, mil_latent_dim=64, 
                  cell_batch_size=256, sample_learning_rate=1e-3, cell_learning_rate=1e-3, encoder_learning_rate=1e-3, 
-                 scMILD_epoch=100, scMILD_neg_weight=0.3,scMILD_stuOpt=3, scMILD_patience=15, val_combined_metric = False, add_suffix="reported", 
-                 n_exp=8, exp=None, opl= False, use_loss = False, op_lambda=0.5, train_stud=True, op_gamma=0.5, epoch_warmup=0,opl_warmup=0, opl_comps=[2]):
+                 scMILD_epoch=100, scMILD_neg_weight=0.3,scMILD_stuOpt=1, scMILD_patience=15, val_combined_metric = False, add_suffix="reported", 
+                 n_exp=8, exp=None, opl= True, use_loss = True, op_lambda=0.5, train_stud=True, op_gamma=0.5, epoch_warmup=0,opl_warmup=0, opl_comps=[2]):
     ae_dir = f'{data_dir}/AE/'
 
     ae_latent_dim, ae_hidden_layers = load_ae_hyperparameters(ae_dir)
