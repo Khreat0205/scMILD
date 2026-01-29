@@ -1,14 +1,15 @@
-# scMILD: Single-cell Multiple Instance Learning for Sample Classification and Associated Subpopulation Discovery
+# scMILD: Single-cell Multiple Instance Learning for Disease Classification
 
-scMILD는 Multiple Instance Learning (MIL) 기반의 약지도 학습 프레임워크로, 샘플 레벨 라벨을 활용하여 질병 관련 세포 하위집단을 식별합니다. 샘플을 bag으로, 세포를 instance로 처리하여 세포 레벨 표현을 학습하고 샘플 분류 성능을 향상시킵니다.
+scMILD는 Multiple Instance Learning (MIL) 기반의 약지도 학습 프레임워크로, 샘플 레벨 라벨을 활용하여 질병 분류 및 질병 관련 세포 하위집단을 식별합니다.
 
 ## 주요 특징
 
-- **VQ-AENB-Conditional**: Vector Quantized Autoencoder with Negative Binomial loss, study/batch 조건부 임베딩 지원
-- **Teacher-Student 구조**: 샘플 레벨 분류(Teacher)와 세포 레벨 점수(Student) 동시 학습
-- **LOOCV 지원**: Leave-One-Out Cross Validation으로 소규모 샘플 데이터셋 평가
-- **Cross-disease 일반화**: 한 질병에서 학습한 모델로 다른 질병 평가
-- **Disease Ratio Regularization**: VQ 코드북 기반 attention score 정규화
+- **VQ-AENB-Conditional**: Vector Quantized Autoencoder with Negative Binomial loss, study/batch 조건부 임베딩
+- **Teacher-Student MIL**: Bag(샘플) 레벨 분류 + Instance(세포) 레벨 점수 동시 학습
+- **LOOCV 지원**: Leave-One-Out Cross Validation으로 소규모 샘플 평가
+- **Cross-disease 일반화**: 한 질병에서 학습 → 다른 질병 평가
+- **Disease Ratio Regularization**: VQ 코드북 기반 attention 정규화
+- **Grid Search 튜닝**: 하이퍼파라미터 자동 최적화
 
 ## 프로젝트 구조
 
@@ -16,37 +17,38 @@ scMILD는 Multiple Instance Learning (MIL) 기반의 약지도 학습 프레임�
 scMILD/
 ├── config/                   # YAML 설정 파일
 │   ├── default.yaml          # 기본 설정
-│   ├── skin3.yaml            # Skin3 (HS 분류) 설정
-│   └── scp1884.yaml          # SCP1884 (CD 분류) 설정
+│   ├── skin3.yaml            # Skin3 (HS) 설정
+│   └── scp1884.yaml          # SCP1884 (CD) 설정
 │
 ├── src/                      # 소스 코드
-│   ├── config.py             # 설정 관리
+│   ├── config.py             # 설정 관리 (dataclass + YAML)
 │   ├── models/               # 모델 정의
 │   │   ├── attention.py      # Gated Attention Module
 │   │   ├── branches.py       # Teacher/Student Branch
-│   │   ├── autoencoder.py    # VQ-AENB, VQ-AENB-Conditional
-│   │   ├── encoder_wrapper.py # Encoder 래퍼
-│   │   └── quantizer.py      # Vector Quantizer
+│   │   ├── autoencoder.py    # VQ-AENB-Conditional
+│   │   ├── encoder_wrapper.py
+│   │   └── quantizer.py
 │   ├── data/                 # 데이터 처리
 │   │   ├── dataset.py        # MilDataset, InstanceDataset
 │   │   ├── splitter.py       # LOOCV, StratifiedKFold
-│   │   └── preprocessing.py  # AnnData 전처리
+│   │   └── preprocessing.py  # AnnData 로딩/전처리
 │   └── training/             # 학습 모듈
 │       ├── trainer.py        # MILTrainer
-│       ├── trainer_ae.py     # AETrainer
+│       ├── trainer_ae.py     # AETrainer (pretrain)
 │       ├── metrics.py        # 평가 메트릭
 │       └── disease_ratio.py  # Disease Ratio Regularization
 │
 ├── scripts/                  # 실행 스크립트
-│   ├── 01_pretrain_encoder.py    # Encoder pretrain
+│   ├── 01_pretrain_ae.py         # Encoder pretrain
 │   ├── 02_train_loocv.py         # LOOCV 학습
-│   ├── 03_finalize_model.py      # Final model 학습
-│   ├── 04_cross_disease_eval.py  # Cross-disease 평가
-│   └── 05_cell_scoring.py        # Cell-level 점수 계산
+│   ├── 03_evaluate.py            # 모델 평가
+│   ├── 04_analyze_attention.py   # Attention 분석
+│   ├── 05_cross_disease.py       # Cross-disease 평가
+│   └── 06_tune_hyperparams.py    # Grid Search 튜닝
 │
+├── CLAUDE.md                 # Claude AI 컨텍스트
 ├── legacy/                   # 기존 코드 (참조용)
-├── results/                  # 결과 저장 (gitignore)
-└── docs/                     # 문서
+└── results/                  # 결과 저장 (gitignore)
 ```
 
 ## 설치
@@ -75,127 +77,139 @@ adata.obs      # 세포 메타데이터:
   - disease_numeric     # 질병 라벨 (0: Control, 1: Disease)
   - study_id_numeric    # Study ID (conditional encoder용)
   - sample              # 샘플 이름 (문자열)
-  - Status              # 질병 상태 (문자열)
+  - Status              # 질병 상태 (HS, CD, ctrl_skin 등)
 ```
+
+### 지원 데이터셋
+
+| Dataset | Disease | Studies | Samples | Cells |
+|---------|---------|---------|---------|-------|
+| Skin3 | HS (Hidradenitis Suppurativa) | GSE175990, GSE220116 | 19 | ~36k |
+| SCP1884 | CD (Crohn's Disease) | SCP1884 | 34 | ~290k |
 
 ## 사용법
 
-### 1. 설정 파일 준비
-
-데이터셋별 설정 파일 생성 (`config/your_dataset.yaml`):
-
-```yaml
-_base_: "default.yaml"
-
-paths:
-  data_root: "/path/to/your/data"
-  pretrained_encoder: "${paths.data_root}/AE/vq_aenb_conditional_whole.pth"
-
-data:
-  adata_path: "${paths.data_root}/adata.h5ad"
-
-  conditional_embedding:
-    column: "study"                    # 또는 "Organ"
-    encoded_column: "study_id_numeric"
-```
-
-### 2. Encoder Pretrain
+### Quick Start
 
 ```bash
-python scripts/01_pretrain_encoder.py \
-    --config config/your_dataset.yaml \
-    --gpu 0
+# Pretrained encoder가 있는 경우, 바로 LOOCV 학습
+python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
 ```
 
-### 3. LOOCV 학습
+### 전체 파이프라인
+
+#### 1. Encoder Pretrain (선택 - 이미 있으면 생략)
 
 ```bash
-python scripts/02_train_loocv.py \
-    --config config/your_dataset.yaml \
-    --gpu 0
+python scripts/01_pretrain_ae.py --config config/default.yaml --gpu 0
 ```
 
-### 4. Final Model 학습
+#### 2. LOOCV 학습
 
 ```bash
-python scripts/03_finalize_model.py \
-    --config config/your_dataset.yaml \
-    --gpu 0
+# Skin3 (HS 분류)
+python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
+
+# SCP1884 (CD 분류)
+python scripts/02_train_loocv.py --config config/scp1884.yaml --gpu 0
 ```
 
-### 5. Cross-disease 평가
+#### 3. 하이퍼파라미터 튜닝 (선택)
 
 ```bash
-python scripts/04_cross_disease_eval.py \
-    --model_dir results/final_model_xxx \
+python scripts/06_tune_hyperparams.py --config config/skin3.yaml --gpu 0 --verbose
+```
+
+#### 4. Cross-disease 평가
+
+```bash
+python scripts/05_cross_disease.py \
     --source_config config/skin3.yaml \
     --target_config config/scp1884.yaml \
     --gpu 0
 ```
 
-### 6. Cell-level 점수 계산
+## 설정 시스템
 
-```bash
-python scripts/05_cell_scoring.py \
-    --model_dir results/final_model_xxx \
-    --config config/your_dataset.yaml \
-    --gpu 0
-```
-
-## 주요 설정 옵션
-
-### MIL 학습 설정 (`config/default.yaml`)
+### Config 상속
 
 ```yaml
+# config/skin3.yaml
+_base_: "default.yaml"  # default.yaml 설정 상속
+
+paths:
+  output_root: "${paths.data_root}/results/skin3"
+
+data:
+  subset:
+    enabled: true
+    values: ["GSE175990", "GSE220116"]  # 이 study만 사용
+```
+
+### 주요 설정 옵션
+
+```yaml
+# MIL 학습 설정
 mil:
-  freeze_encoder: true        # Encoder 고정 여부
-  use_projection: true        # Projection layer 사용
+  freeze_encoder: true
+  use_projection: true
 
   training:
-    epochs: 100
     learning_rate: 0.0001
+    encoder_learning_rate: 0.0005
+    epochs: 100
     use_early_stopping: false  # LOOCV에서는 false 권장
 
   loss:
     negative_weight: 0.3
     disease_ratio_reg:
-      enabled: false           # Disease ratio regularization
+      enabled: false
       lambda_weight: 0.1
-```
 
-### Disease Ratio Regularization
-
-VQ 코드북의 각 코드별 질병 비율을 타겟으로 attention score를 정규화:
-
-```yaml
-mil:
-  loss:
-    disease_ratio_reg:
-      enabled: true
-      lambda_weight: 0.1      # 0.05 ~ 0.2 권장
-      alpha: 1.0              # Beta prior smoothing
-      beta: 1.0
+# 하이퍼파라미터 튜닝 설정
+tuning:
+  enabled: false
+  learning_rate: [0.001, 0.0001]
+  encoder_learning_rate: [0.001, 0.0001]
+  epochs: [100, 50]
+  disease_ratio_lambda: [0.0, 0.05, 0.1]
+  metric: "auc"
 ```
 
 ## 출력 결과
 
-### LOOCV 결과 (`results/loocv_*/`)
+### LOOCV 결과
 ```
-loocv_20250129_123456/
+results/loocv_YYYYMMDD_HHMMSS/
 ├── results.csv           # 폴드별 메트릭 (AUC, Accuracy, F1)
 └── models/               # 폴드별 모델 체크포인트
 ```
 
-### Cell Scoring 결과 (`results/cell_scores_*/`)
+### 튜닝 결과
 ```
-cell_scores_20250129_123456/
-├── cell_scores.csv       # 세포별 attention score, prediction
-└── sample_summary.csv    # 샘플별 요약
+results/tuning_YYYYMMDD_HHMMSS/
+└── tuning_results.csv    # 모든 하이퍼파라미터 조합별 결과
+```
+
+## 아키텍처
+
+```
+[scRNA-seq Data]
+       ↓
+[VQ-AENB-Conditional Encoder] ← Pretrained (frozen)
+       ↓
+[Projection Layer] ← Trainable
+       ↓
+[Gated Attention MIL]
+    ↓         ↓
+[Teacher]  [Student]
+(Bag-level) (Instance-level)
 ```
 
 ## 참고
 
-- 기존 스크립트(`preprocess_adata.py`, `train_scMILD.py` 등)는 `legacy/` 폴더에 보관
+- **CLAUDE.md**: Claude AI가 프로젝트를 이해하기 위한 컨텍스트 파일
+- **legacy/**: 기존 스크립트 (참조용)
 - 새 파이프라인은 YAML 설정 기반으로 단순화됨
 
 ## Contact
