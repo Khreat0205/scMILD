@@ -176,20 +176,46 @@ tuning:
   metric: "auc"
 ```
 
-## 출력 결과
+## 출력 결과 및 모델 관리
 
-### LOOCV 결과
+### 디렉토리 구조
 ```
-results/loocv_YYYYMMDD_HHMMSS/
-├── results.csv           # 폴드별 메트릭 (AUC, Accuracy, F1)
-└── models/               # 폴드별 모델 체크포인트
+scMILDQ_Cond/results/
+├── pretrained/                        # 최종 pretrained encoder (수동 배치)
+│   └── vq_aenb_conditional_whole.pth
+├── pretrain_20260129_HHMMSS/          # pretrain 학습 결과 (타임스탬프)
+│   ├── vq_aenb_conditional.pth
+│   └── training_history.json
+├── skin3/
+│   ├── loocv_20260129_HHMMSS/         # LOOCV 결과
+│   │   ├── results.csv
+│   │   └── models/
+│   └── tuning_20260129_HHMMSS/        # 튜닝 결과
+│       └── tuning_results.csv
+└── scp1884/
+    └── ...
 ```
 
-### 튜닝 결과
+### 모델 배치 (수동)
+
+학습 결과는 **타임스탬프가 찍힌 폴더**에 저장됩니다. 최종 모델은 수동으로 지정된 경로에 복사해야 합니다:
+
+```bash
+# Pretrained encoder 배치
+mkdir -p results/pretrained
+cp results/pretrain_YYYYMMDD_HHMMSS/vq_aenb_conditional.pth \
+   results/pretrained/vq_aenb_conditional_whole.pth
+
+# Cross-disease 평가용 모델 배치 (예시)
+# skin3에서 학습한 모델로 scp1884 평가 시
+cp results/skin3/loocv_YYYYMMDD_HHMMSS/models/best_model.pth \
+   results/skin3/final_model.pth
 ```
-results/tuning_YYYYMMDD_HHMMSS/
-└── tuning_results.csv    # 모든 하이퍼파라미터 조합별 결과
-```
+
+**왜 수동인가?**
+- 여러 번 학습 후 best 모델 선택 가능
+- 실수로 좋은 모델이 덮어씌워지는 것 방지
+- 어떤 모델을 사용하는지 명시적으로 관리
 
 ## 아키텍처
 
