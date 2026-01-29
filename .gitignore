@@ -21,6 +21,6 @@ downstream/
 runs/
 cmd_PBMC2.*
 run_scMILD_*
-*.ipynb
+# *.ipynb
 *.log
 !requirements.txt
