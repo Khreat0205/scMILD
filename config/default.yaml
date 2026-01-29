@@ -1,0 +1,167 @@
+# scMILD Configuration File
+# =========================
+# 이 파일을 복사하여 dataset별 설정 파일을 만드세요 (예: skin3.yaml, scp1884.yaml)
+
+# ============================================================================
+# 경로 설정 (병원망 환경 기준)
+# ============================================================================
+paths:
+  # 기본 데이터 디렉토리 (환경변수 또는 직접 지정)
+  data_root: "/home/bmi-user/workspace/data/HSvsCD"
+
+  # Pretrained encoder 경로
+  pretrained_encoder: "${paths.data_root}/data_conditional/AE/vq_aenb_conditional_whole.pth"
+
+  # 결과 저장 디렉토리
+  output_root: "${paths.data_root}/results"
+
+  # conda 환경
+  conda_env: "/home/bmi-user/workspace/data/scvi-env"
+
+# ============================================================================
+# 데이터 설정
+# ============================================================================
+data:
+  # AnnData 파일 경로 (dataset별로 override)
+  adata_path: null  # 예: "${paths.data_root}/data/adata_skin3.h5ad"
+
+  # 관측 컬럼명
+  columns:
+    sample_id: "sample_id_numeric"
+    sample_name: "sample"
+    disease_label: "disease_numeric"
+    status: "Status"
+
+  # Conditional encoder용 임베딩 컬럼 설정
+  # 'study', 'Organ' 등 categorical 컬럼 사용 가능
+  # pretrain 시 사용한 컬럼과 동일해야 함
+  conditional_embedding:
+    column: "study"                      # 원본 컬럼명 (adata.obs)
+    encoded_column: "study_id_numeric"   # 인코딩된 컬럼명 (자동 생성됨)
+
+  # 전처리 설정
+  preprocessing:
+    n_top_genes: 6000
+    normalize_total: 10000
+    log_transform: true
+
+# ============================================================================
+# 데이터 분할 설정
+# ============================================================================
+splitting:
+  # 분할 전략: "loocv" | "stratified_kfold" | "repeated_stratified_kfold"
+  strategy: "loocv"
+
+  # K-Fold 설정 (strategy가 kfold 계열일 때만 사용)
+  n_splits: 5
+  n_repeats: 3
+
+  # 랜덤 시드
+  random_seed: 42
+
+# ============================================================================
+# Pretrained Encoder 설정 (VQ-AENB-Conditional)
+# ============================================================================
+encoder:
+  # 모델 타입
+  type: "VQ_AENB_Conditional"
+
+  # 아키텍처
+  latent_dim: 128
+  num_codes: 1024
+
+  # 학습 설정 (pretrain용)
+  pretrain:
+    batch_size: 256
+    learning_rate: 0.001
+    epochs: 50
+    patience: 5
+
+# ============================================================================
+# MIL (scMILD) 설정
+# ============================================================================
+mil:
+  # 아키텍처
+  latent_dim: 128  # MIL branch hidden dimension
+  attention_dim: 128
+  num_classes: 2
+
+  # Encoder 사용 방식
+  freeze_encoder: true
+  use_projection: true
+  projection_dim: 128
+
+  # 학습 설정
+  training:
+    batch_size: 2  # 샘플(bag) 단위
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0005  # projection layer용
+    epochs: 100
+    patience: 15  # LOOCV에서는 early stopping 비활성화 옵션 있음
+    use_early_stopping: false  # LOOCV용: false 권장
+
+  # Student branch 설정
+  student:
+    enabled: true
+    optimize_period: 3  # 매 N epoch마다 student 최적화
+
+  # 손실 함수 가중치
+  loss:
+    negative_weight: 0.3  # 음성 샘플 가중치
+    orthogonal_projection_lambda: 0.2
+
+    # Disease Ratio Regularization (VQ 코드별 질병 비율 기반)
+    # attention score가 VQ 코드의 질병 비율과 유사해지도록 유도
+    disease_ratio_reg:
+      enabled: false           # true로 설정시 활성화
+      lambda_weight: 0.1       # regularization 강도
+      alpha: 1.0               # Beta prior alpha (smoothing)
+      beta: 1.0                # Beta prior beta (smoothing)
+
+# ============================================================================
+# 평가 설정
+# ============================================================================
+evaluation:
+  # 저장할 메트릭
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "f1_score"
+    - "precision"
+    - "recall"
+
+  # Cell-level 분석
+  cell_scoring:
+    save_attention_scores: true
+    save_predictions: true
+
+# ============================================================================
+# 로깅 설정
+# ============================================================================
+logging:
+  # 로그 레벨: "DEBUG" | "INFO" | "WARNING" | "ERROR"
+  level: "INFO"
+
+  # 결과 저장 형식
+  save_format: "csv"
+
+  # 체크포인트 저장
+  save_checkpoints: true
+  checkpoint_frequency: 10  # epochs
+
+# ============================================================================
+# 하드웨어 설정
+# ============================================================================
+hardware:
+  # GPU 설정
+  device: "cuda"
+  gpu_ids: [0]  # 사용할 GPU ID 리스트
+
+  # 멀티프로세싱
+  num_workers: 4
+
+# ============================================================================
+# TODO (Phase 2에서 구현 예정)
+# ============================================================================
+# - Repeated Stratified K-Fold 옵션
+# - MLflow/W&B 통합

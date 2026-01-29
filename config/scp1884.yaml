@@ -1,0 +1,52 @@
+# scMILD Configuration - SCP1884 (CD Classification)
+# ===================================================
+# CD 18 samples / Ctrl 16 samples = 34 total samples
+
+# 기본 설정 상속
+_base_: "default.yaml"
+
+# ============================================================================
+# SCP1884 특화 경로
+# ============================================================================
+paths:
+  data_root: "/home/bmi-user/workspace/data/HSvsCD"
+  pretrained_encoder: "${paths.data_root}/data_conditional/AE/vq_aenb_conditional_whole.pth"
+  output_root: "${paths.data_root}/results/scp1884"
+
+# ============================================================================
+# SCP1884 데이터 설정
+# ============================================================================
+data:
+  adata_path: "${paths.data_root}/data/adata_colon_scp1884.h5ad"
+
+  # 데이터셋 정보 (참고용)
+  info:
+    name: "SCP1884"
+    disease: "CD"  # Crohn's Disease
+    n_samples: 34
+    n_disease: 18
+    n_control: 16
+    n_cells: 289730
+
+# ============================================================================
+# LOOCV 설정 (34 folds)
+# ============================================================================
+splitting:
+  strategy: "loocv"
+
+# ============================================================================
+# MIL 학습 설정 (SCP1884 최적화)
+# ============================================================================
+mil:
+  latent_dim: 128
+
+  training:
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0005
+    epochs: 100
+    use_early_stopping: false
+
+  # SCP1884는 세포 수가 많아서 subsampling 고려
+  subsampling:
+    enabled: true
+    max_cells_per_sample: 5000

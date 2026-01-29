@@ -1,169 +1,203 @@
 # scMILD: Single-cell Multiple Instance Learning for Sample Classification and Associated Subpopulation Discovery
 
-We propose scMILD, a weakly supervised learning framework based on Multiple Instance Learning (MIL), which leverages sample-level labels to identify condition-associated cell subpopulations. By treating samples as bags and cells as instances, scMILD effectively learns cell-level representations and improves sample classification performance.
+scMILD는 Multiple Instance Learning (MIL) 기반의 약지도 학습 프레임워크로, 샘플 레벨 라벨을 활용하여 질병 관련 세포 하위집단을 식별합니다. 샘플을 bag으로, 세포를 instance로 처리하여 세포 레벨 표현을 학습하고 샘플 분류 성능을 향상시킵니다.
 
-This repository contains the implementation of scMILD. The pipeline consists of three main steps: data preprocessing, autoencoder pretraining, and scMILD training.
+## 주요 특징
 
-## Data Preparation
+- **VQ-AENB-Conditional**: Vector Quantized Autoencoder with Negative Binomial loss, study/batch 조건부 임베딩 지원
+- **Teacher-Student 구조**: 샘플 레벨 분류(Teacher)와 세포 레벨 점수(Student) 동시 학습
+- **LOOCV 지원**: Leave-One-Out Cross Validation으로 소규모 샘플 데이터셋 평가
+- **Cross-disease 일반화**: 한 질병에서 학습한 모델로 다른 질병 평가
+- **Disease Ratio Regularization**: VQ 코드북 기반 attention score 정규화
 
-The input data should be in the form of a single-cell gene expression matrix stored in the AnnData format (`.h5ad` file). The AnnData object should have the following structure:
+## 프로젝트 구조
 
-- `adata.X`: The gene expression matrix, where rows correspond to cells and columns correspond to genes.
-- `adata.obs`: A dataframe containing cell metadata, including the following columns:
-  - Sample label column (e.g., 'Health'): Indicates the sample label for each cell (e.g., 'Healthy', 'Inflamed').
-  - Sample ID column (e.g., 'Subject'): Indicates the sample ID for each cell.
-  - Cell type column (e.g., 'Cluster'): Indicates the cell type for each cell.
-
-Place the `.h5ad` file in the `data` directory with a specific dataset name (e.g., `data/MyData/adata.h5ad`).
-
-## Pipeline
-
-### 1. Data Preprocessing
-
-Run the `preprocess_adata.py` script to preprocess the data and save split datasets:
-
-```bash
-python preprocess_data.py --data_dir data/MyData --data_dim 2000 --obs_name_sample_label Health --obs_name_sample_id Subject --obs_name_cell_type Cluster --sample_label_negative Healthy --sample_label_positive Inflamed --device_num 6 --n_exp 8
 ```
-This script performs the following steps:
-- Normalization and log transformation of the gene expression data.
-- Selection of highly variable genes.
-- Subset the data to include only the specified sample labels.
-- One-hot encoding of sample labels.
-- Splitting the data into train, validation, and test sets for multiple experiments.
-
-The preprocessed datasets will be saved in the `data/MyData` directory.
-
-#### Data Preprocessing Script
-
-`preprocess_adata.py`: This script preprocesses the data and saves split datasets.
-
-**Usage**
-```bash
-python preprocess_data.py [--data_dir DATA_DIR] [--data_dim DATA_DIM] 
-                          [--obs_name_sample_label OBS_NAME_SAMPLE_LABEL]
-                          [--obs_name_sample_id OBS_NAME_SAMPLE_ID] 
-                          [--obs_name_cell_type OBS_NAME_CELL_TYPE]
-                          [--sample_label_negative SAMPLE_LABEL_NEGATIVE]
-                          [--sample_label_positive SAMPLE_LABEL_POSITIVE]
-                          [--device_num DEVICE_NUM] [--n_exp N_EXP]
-```
-
-**Arguments**
-- `--data_dir`: Directory containing adata.h5ad (default: "data/MyData")
-- `--data_dim`: Number of top Highly varialbe genes to select (default: 2000)
-- `--obs_name_sample_label`: Obs column name for sample labels (default: 'Health')
-- `--obs_name_sample_id`: Obs column name for sample IDs (default: 'Subject')
-- `--obs_name_cell_type`: Obs column name for cell types (default: 'Cluster')
-- `--sample_label_negative`: Negative sample label (default: 'Healthy')
-- `--sample_label_positive`: Positive sample label (default: 'Inflamed')
-- `--device_num`: CUDA device number (default: 6)
-- `--n_exp`: Number of experiments (default: 8)
-
-
-**Example**
-```bash
-python preprocess_data.py --data_dir data/MyData --data_dim 2000 --obs_name_sample_label Health --obs_name_sample_id Subject --obs_name_cell_type Cluster --sample_label_negative Healthy --sample_label_positive Inflamed --device_num 6 --n_exp 8
+scMILD/
+├── config/                   # YAML 설정 파일
+│   ├── default.yaml          # 기본 설정
+│   ├── skin3.yaml            # Skin3 (HS 분류) 설정
+│   └── scp1884.yaml          # SCP1884 (CD 분류) 설정
+│
+├── src/                      # 소스 코드
+│   ├── config.py             # 설정 관리
+│   ├── models/               # 모델 정의
+│   │   ├── attention.py      # Gated Attention Module
+│   │   ├── branches.py       # Teacher/Student Branch
+│   │   ├── autoencoder.py    # VQ-AENB, VQ-AENB-Conditional
+│   │   ├── encoder_wrapper.py # Encoder 래퍼
+│   │   └── quantizer.py      # Vector Quantizer
+│   ├── data/                 # 데이터 처리
+│   │   ├── dataset.py        # MilDataset, InstanceDataset
+│   │   ├── splitter.py       # LOOCV, StratifiedKFold
+│   │   └── preprocessing.py  # AnnData 전처리
+│   └── training/             # 학습 모듈
+│       ├── trainer.py        # MILTrainer
+│       ├── trainer_ae.py     # AETrainer
+│       ├── metrics.py        # 평가 메트릭
+│       └── disease_ratio.py  # Disease Ratio Regularization
+│
+├── scripts/                  # 실행 스크립트
+│   ├── 01_pretrain_encoder.py    # Encoder pretrain
+│   ├── 02_train_loocv.py         # LOOCV 학습
+│   ├── 03_finalize_model.py      # Final model 학습
+│   ├── 04_cross_disease_eval.py  # Cross-disease 평가
+│   └── 05_cell_scoring.py        # Cell-level 점수 계산
+│
+├── legacy/                   # 기존 코드 (참조용)
+├── results/                  # 결과 저장 (gitignore)
+└── docs/                     # 문서
 ```
 
-### 2. Autoencoder Pretraining
-
-Run the `pretraining_autoencoder.py` script to pretrain an autoencoder model:
+## 설치
 
 ```bash
-python pretraining_autoencoder.py --data_dir data/MyData --device_num 6 --ae_learning_rate 1e-3 --ae_epochs 25 --ae_patience 3 --ae_latent_dim 128 --ae_hidden_layers 512 256 128 --ae_batch_size 128 --data_dim 2000 --n_exp 8
+# 저장소 클론
+git clone https://github.com/your-repo/scMILD.git
+cd scMILD
+
+# 환경 설정 (conda 권장)
+conda create -n scmild python=3.9
+conda activate scmild
+
+# 의존성 설치
+pip install torch torchvision scanpy anndata scikit-learn pandas numpy pyyaml
 ```
 
-This script trains an autoencoder model on the preprocessed data. The trained autoencoder model will be saved in the `data/MyData/AE` directory.
+## 데이터 준비
 
-#### Autoencoder Pretraining Script
+입력 데이터는 AnnData 형식(`.h5ad`)이어야 합니다:
 
-`pretraining_autoencoder.py`: This script performs pretraining of an autoencoder model and saves the trained model.
+```python
+adata.X        # 유전자 발현 매트릭스 (cells × genes)
+adata.obs      # 세포 메타데이터:
+  - sample_id_numeric   # 샘플 ID (숫자)
+  - disease_numeric     # 질병 라벨 (0: Control, 1: Disease)
+  - study_id_numeric    # Study ID (conditional encoder용)
+  - sample              # 샘플 이름 (문자열)
+  - Status              # 질병 상태 (문자열)
+```
 
-**Usage**
+## 사용법
+
+### 1. 설정 파일 준비
+
+데이터셋별 설정 파일 생성 (`config/your_dataset.yaml`):
+
+```yaml
+_base_: "default.yaml"
+
+paths:
+  data_root: "/path/to/your/data"
+  pretrained_encoder: "${paths.data_root}/AE/vq_aenb_conditional_whole.pth"
+
+data:
+  adata_path: "${paths.data_root}/adata.h5ad"
+
+  conditional_embedding:
+    column: "study"                    # 또는 "Organ"
+    encoded_column: "study_id_numeric"
+```
+
+### 2. Encoder Pretrain
+
 ```bash
-python pretraining_autoencoder.py [--data_dir DATA_DIR] [--device_num DEVICE_NUM]
-                                  [--ae_learning_rate AE_LEARNING_RATE] [--ae_epochs AE_EPOCHS]
-                                  [--ae_patience AE_PATIENCE] [--ae_latent_dim AE_LATENT_DIM]
-                                  [--ae_hidden_layers AE_HIDDEN_LAYERS [AE_HIDDEN_LAYERS ...]]
-                                  [--ae_batch_size AE_BATCH_SIZE] [--data_dim DATA_DIM]
-                                  [--n_exp N_EXP]
+python scripts/01_pretrain_encoder.py \
+    --config config/your_dataset.yaml \
+    --gpu 0
 ```
 
-**Arguments**
-- `--data_dir`: Data directory (default: "data/MyData")
-- `--device_num`: CUDA device number (default: 6)
-- `--ae_learning_rate`: Learning rate for autoencoder (default: 1e-3)
-- `--ae_epochs`: Number of epochs for autoencoder training (default: 25)
-- `--ae_patience`: Patience for early stopping (default: 3)
-- `--ae_latent_dim`: Latent dimension for autoencoder (default: 128)
-- `--ae_hidden_layers`: Hidden layers for autoencoder (default: [512, 256, 128])
-- `--ae_batch_size`: Batch size for autoencoder (default: 128)
-- `--data_dim`: Data dimension (default: 2000)
-- `--n_exp`: Number of experiments (default: 8)
-
-**Example**
-```bash
-python pretraining_autoencoder.py --data_dir data/MyData --device_num 6 --ae_learning_rate 1e-3 --ae_epochs 25 --ae_patience 3 --ae_latent_dim 128 --ae_hidden_layers 512 256 128 --ae_batch_size 128 --data_dim 2000 --n_exp 8
-```
-
-### 3. scMILD Training
-
-Run the `train_scMILD.py` script to train the scMILD model:
+### 3. LOOCV 학습
 
 ```bash
-python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --cell_batch_size 256 --sample_learning_rate 1e-3 --cell_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
+python scripts/02_train_loocv.py \
+    --config config/your_dataset.yaml \
+    --gpu 0
 ```
 
-This script trains the scMILD model using the pretrained autoencoder. The trained scMILD model and evaluation results will be saved in the `results` directory.
+### 4. Final Model 학습
 
-#### scMILD Training Script
-
-`train_scMILD.py`: This script performs training of the scMILD model and saves the trained model.
-
-**Usage**
 ```bash
-python train_scMILD.py [--data_dir DATA_DIR] [--dataset DATASET] 
-                       [--device_num DEVICE_NUM] [--data_dim DATA_DIM]
-                       [--mil_latent_dim MIL_LATENT_DIM] [--cell_batch_size cell_BATCH_SIZE]
-                       [--sample_learning_rate SAMPLE_LEARNING_RATE]
-                       [--cell_learning_rate CELL_LEARNING_RATE]
-                       [--encoder_learning_rate ENCODER_LEARNING_RATE]
-                       [--scMILD_epoch SCMILD_EPOCH] [--scMILD_neg_weight SCMILD_NEG_WEIGHT]
-                       [--scMILD_stuOpt SCMILD_STUOPT] [--scMILD_patience SCMILD_PATIENCE]
-                       [--add_suffix ADD_SUFFIX] [--n_exp N_EXP] [--exp EXP] [--gmm GMM] [--op_lambda OP_LAMBDA]
+python scripts/03_finalize_model.py \
+    --config config/your_dataset.yaml \
+    --gpu 0
 ```
 
-**Arguments**
-- `--data_dir`: Data directory (default: "data/MyData")
-- `--dataset`: Dataset name (default: "MyData")
-- `--device_num`: CUDA device number (default: 6)
-- `--data_dim`: Data dimension (default: 2000)
-- `--mil_latent_dim`: Latent dimension for MIL (default: 64)
-- `--cell_batch_size`: Batch size for cell (default: 256)
-- `--sample_learning_rate`: Learning rate for sample (default: 1e-3)
-- `--cell_learning_rate`: Learning rate for cell (default: 1e-3)
-- `--encoder_learning_rate`: Learning rate for encoder (default: 1e-3)
-- `--scMILD_epoch`: Number of epochs for scMILD (default: 500)
-- `--scMILD_neg_weight`: Negative weight for scMILD (default: 0.3)
-- `--scMILD_stuOpt`: cell optimization period (default: 3)
-- `--scMILD_patience`: Patience for early stopping (default: 15)
-- `--add_suffix`: Suffix for output files (default: "reported")
-- `--n_exp`: Number of experiments (default: 8)
-- `--exp`: Experiment number (if None, all experiments will be run) (default: None)
-- `--gmm`: Use GMM (default: True)
-- `--op_lambda`: Lambda for orthogonal projection loss (default: 0.5)
+### 5. Cross-disease 평가
 
-**Example**
-Run all experiments:
 ```bash
-python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --cel_batch_size 256 --sample_learning_rate 1e-3 --cel_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8
+python scripts/04_cross_disease_eval.py \
+    --model_dir results/final_model_xxx \
+    --source_config config/skin3.yaml \
+    --target_config config/scp1884.yaml \
+    --gpu 0
 ```
 
-Run a single experiment (e.g., experiment 3):
+### 6. Cell-level 점수 계산
+
 ```bash
-python train_scMILD.py --data_dir data/MyData --dataset MyData --device_num 6 --data_dim 2000 --mil_latent_dim 64 --cel_batch_size 256 --sample_learning_rate 1e-3 --cell_learning_rate 1e-3 --encoder_learning_rate 1e-3 --scMILD_epoch 500 --scMILD_neg_weight 0.3 --scMILD_stuOpt 3 --scMILD_patience 15 --add_suffix reported --n_exp 8 --exp 3
+python scripts/05_cell_scoring.py \
+    --model_dir results/final_model_xxx \
+    --config config/your_dataset.yaml \
+    --gpu 0
 ```
 
-# Contact
+## 주요 설정 옵션
+
+### MIL 학습 설정 (`config/default.yaml`)
+
+```yaml
+mil:
+  freeze_encoder: true        # Encoder 고정 여부
+  use_projection: true        # Projection layer 사용
+
+  training:
+    epochs: 100
+    learning_rate: 0.0001
+    use_early_stopping: false  # LOOCV에서는 false 권장
+
+  loss:
+    negative_weight: 0.3
+    disease_ratio_reg:
+      enabled: false           # Disease ratio regularization
+      lambda_weight: 0.1
+```
+
+### Disease Ratio Regularization
+
+VQ 코드북의 각 코드별 질병 비율을 타겟으로 attention score를 정규화:
+
+```yaml
+mil:
+  loss:
+    disease_ratio_reg:
+      enabled: true
+      lambda_weight: 0.1      # 0.05 ~ 0.2 권장
+      alpha: 1.0              # Beta prior smoothing
+      beta: 1.0
+```
+
+## 출력 결과
+
+### LOOCV 결과 (`results/loocv_*/`)
+```
+loocv_20250129_123456/
+├── results.csv           # 폴드별 메트릭 (AUC, Accuracy, F1)
+└── models/               # 폴드별 모델 체크포인트
+```
+
+### Cell Scoring 결과 (`results/cell_scores_*/`)
+```
+cell_scores_20250129_123456/
+├── cell_scores.csv       # 세포별 attention score, prediction
+└── sample_summary.csv    # 샘플별 요약
+```
+
+## 참고
+
+- 기존 스크립트(`preprocess_adata.py`, `train_scMILD.py` 등)는 `legacy/` 폴더에 보관
+- 새 파이프라인은 YAML 설정 기반으로 단순화됨
+
+## Contact
+
 - Kyeonghun Jeong, scientist0205@snu.ac.kr
