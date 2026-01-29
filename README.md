@@ -39,7 +39,7 @@ scMILD/
 │       └── disease_ratio.py  # Disease Ratio Regularization
 │
 ├── scripts/                  # 실행 스크립트
-│   ├── 01_pretrain_ae.py         # Encoder pretrain
+│   ├── 01_pretrain_encoder.py    # Encoder pretrain
 │   ├── 02_train_loocv.py         # LOOCV 학습
 │   ├── 03_evaluate.py            # 모델 평가
 │   ├── 04_analyze_attention.py   # Attention 분석
@@ -98,10 +98,22 @@ python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
 
 ### 전체 파이프라인
 
-#### 1. Encoder Pretrain (선택 - 이미 있으면 생략)
+#### 1. Encoder Pretrain (필수 - 처음 한 번)
 
 ```bash
-python scripts/01_pretrain_ae.py --config config/default.yaml --gpu 0
+python scripts/01_pretrain_encoder.py --config config/default.yaml --gpu 0
+```
+
+Pretrain 완료 후, 결과물을 `pretrained/` 폴더로 복사:
+
+```bash
+# 모델 파일 복사
+cp results/pretrain_YYYYMMDD_HHMMSS/vq_aenb_conditional.pth \
+   results/pretrained/vq_aenb_conditional_whole.pth
+
+# study_mapping.json 복사 (중요! subset 학습 시 필요)
+cp results/pretrain_YYYYMMDD_HHMMSS/study_mapping.json \
+   results/pretrained/study_mapping.json
 ```
 
 #### 2. LOOCV 학습
@@ -182,13 +194,17 @@ tuning:
 ```
 scMILDQ_Cond/results/
 ├── pretrained/                        # 최종 pretrained encoder (수동 배치)
-│   └── vq_aenb_conditional_whole.pth
+│   ├── vq_aenb_conditional_whole.pth  # 모델 가중치
+│   └── study_mapping.json             # Study ID 매핑 (subset 학습 시 필수)
 ├── pretrain_20260129_HHMMSS/          # pretrain 학습 결과 (타임스탬프)
 │   ├── vq_aenb_conditional.pth
+│   ├── study_mapping.json             # {study_id: study_name} 매핑
 │   └── training_history.json
 ├── skin3/
 │   ├── loocv_20260129_HHMMSS/         # LOOCV 결과
-│   │   ├── results.csv
+│   │   ├── results.csv                # Fold별 메트릭
+│   │   ├── overall_results.csv        # 전체 AUROC (concatenated)
+│   │   ├── predictions.csv            # 샘플별 예측 확률
 │   │   └── models/
 │   └── tuning_20260129_HHMMSS/        # 튜닝 결과
 │       └── tuning_results.csv
@@ -201,10 +217,12 @@ scMILDQ_Cond/results/
 학습 결과는 **타임스탬프가 찍힌 폴더**에 저장됩니다. 최종 모델은 수동으로 지정된 경로에 복사해야 합니다:
 
 ```bash
-# Pretrained encoder 배치
+# Pretrained encoder 배치 (모델 + study_mapping 모두 필요)
 mkdir -p results/pretrained
 cp results/pretrain_YYYYMMDD_HHMMSS/vq_aenb_conditional.pth \
    results/pretrained/vq_aenb_conditional_whole.pth
+cp results/pretrain_YYYYMMDD_HHMMSS/study_mapping.json \
+   results/pretrained/study_mapping.json
 
 # Cross-disease 평가용 모델 배치 (예시)
 # skin3에서 학습한 모델로 scp1884 평가 시
@@ -216,6 +234,14 @@ cp results/skin3/loocv_YYYYMMDD_HHMMSS/models/best_model.pth \
 - 여러 번 학습 후 best 모델 선택 가능
 - 실수로 좋은 모델이 덮어씌워지는 것 방지
 - 어떤 모델을 사용하는지 명시적으로 관리
+
+### LOOCV 평가 메트릭
+
+LOOCV에서는 fold별 AUC가 아닌 **전체 예측을 concatenate하여 계산한 AUROC**를 사용합니다:
+- `overall_results.csv`: 전체 AUROC, Accuracy, F1 Score
+- `predictions.csv`: 각 샘플의 예측 확률 (추가 분석용)
+
+이는 LOOCV에서 각 fold의 테스트 샘플이 1개이므로, fold별 AUC 계산이 무의미하기 때문입니다.
 
 ## 아키텍처
 

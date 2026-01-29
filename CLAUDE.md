@@ -61,8 +61,8 @@ scMILD/
 │       ├── splitter.py        # LOOCVSplitter, StratifiedKFoldSplitter
 │       └── preprocessing.py   # load_adata_with_subset 등
 ├── scripts/
-│   ├── 01_pretrain_ae.py      # Encoder pretrain
-│   ├── 02_train_loocv.py      # LOOCV 기반 MIL 학습
+│   ├── 01_pretrain_encoder.py # Encoder pretrain + study_mapping.json 생성
+│   ├── 02_train_loocv.py      # LOOCV 기반 MIL 학습 (전체 AUROC 계산)
 │   ├── 03_evaluate.py         # 모델 평가
 │   ├── 04_analyze_attention.py # Attention 분석
 │   ├── 05_cross_disease.py    # Cross-disease 일반화
@@ -76,10 +76,14 @@ scMILD/
 ## 핵심 실행 흐름
 
 ```bash
-# 1. Encoder Pretrain (이미 있으면 생략)
-python scripts/01_pretrain_ae.py --config config/default.yaml
+# 1. Encoder Pretrain (처음 한 번, 전체 데이터)
+python scripts/01_pretrain_encoder.py --config config/default.yaml
 
-# 2. MIL 학습 (LOOCV)
+# 1.1 Pretrain 결과물 배치 (수동)
+cp results/pretrain_*/vq_aenb_conditional.pth results/pretrained/vq_aenb_conditional_whole.pth
+cp results/pretrain_*/study_mapping.json results/pretrained/study_mapping.json
+
+# 2. MIL 학습 (LOOCV) - subset 데이터 사용
 python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
 
 # 3. 하이퍼파라미터 튜닝 (선택)
@@ -107,7 +111,10 @@ adata.obs        # 세포 메타데이터
 
 ### Subset 로직
 - **Pretrain**: 전체 데이터 (`Whole_SCP_PCD_Skin_805k_6k.h5ad`)
+  - `study_id_numeric` 컬럼 생성 및 `study_mapping.json` 저장
 - **MIL 학습**: Study별 subset (config의 `data.subset.values`)
+  - `study_mapping.json`을 사용하여 pretrain과 동일한 study ID 매핑 적용
+  - **중요**: subset 캐시에는 `study_id_numeric`이 없으므로 런타임에 매핑 적용
 
 ## Config 시스템
 
@@ -128,6 +135,7 @@ data:
 ### 주요 설정 경로
 - `config.paths.pretrained_encoder`: Pretrained encoder 경로
 - `config.data.subset`: 데이터 subset 설정
+- `config.data.conditional_embedding.mapping_path`: Study ID 매핑 파일 경로 (**중요**)
 - `config.mil.training`: 학습 하이퍼파라미터
 - `config.tuning`: Grid search 설정
 
@@ -165,6 +173,9 @@ from src.models import VQEncoderWrapperConditional, TeacherBranch, StudentBranch
 ### 2. LOOCV 사용 시
 - Early stopping **비활성화** 권장 (`use_early_stopping: false`)
 - 샘플 수가 적어서 validation set 분리가 어려움
+- **AUROC 계산**: 각 fold의 예측을 concatenate하여 전체 AUROC 계산
+  - fold별 AUC는 테스트 샘플이 1개라 의미 없음
+  - `overall_results.csv`에 전체 메트릭 저장
 
 ### 3. 병원망 환경
 - 외부 패키지 설치 제한
@@ -191,6 +202,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 ### 캐시 문제
 - Subset 캐시 위치: `config.data.subset.cache_dir`
 - 캐시 삭제 후 재실행하면 새로 생성
+- **주의**: Subset 캐시에는 `study_id_numeric`이 없음 → `study_mapping.json` 필요
+
+### study_ids 전달 관련
+- Conditional encoder는 `study_ids`를 입력으로 받아 배치 효과 보정
+- `study_mapping.json`이 없으면 경고 발생: `WARNING: study_ids not provided to conditional encoder`
+- 해결: pretrain 후 `study_mapping.json`을 `results/pretrained/`에 복사
 
 ## 코드 수정 시 체크리스트
 
@@ -198,3 +215,5 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 2. [ ] 새 config 옵션 추가 시 `src/config.py`의 dataclass도 수정
 3. [ ] 새 스크립트 추가 시 `scripts/` 디렉토리에 번호 체계 유지
 4. [ ] 모델 구조 변경 시 pretrained encoder와 호환성 확인
+5. [ ] Pretrain 후 `study_mapping.json` 복사 확인
+6. [ ] Subset 데이터 사용 시 `conditional_embedding.mapping_path` 설정 확인
