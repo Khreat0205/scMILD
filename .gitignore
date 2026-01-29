@@ -15,7 +15,7 @@ events.out.tfevents.*
 *.pdf
 *.rds
 *.RDS
-data/
+# data/
 results/
 downstream/
 runs/
