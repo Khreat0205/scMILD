@@ -6,10 +6,10 @@ import json
 from src.trainer_ae import optimizer_ae
 from tqdm import tqdm as tdqm
 
-def pretraining_autoencoder(data_dir="data/MyData", device_num=6, ae_learning_rate=1e-3, ae_epochs=15, ae_patience=3, 
+def pretraining_autoencoder(data_dir="data/MyData", device_num=6, ae_learning_rate=1e-3, ae_epochs=100, ae_patience=15, 
                             ae_latent_dim=128, ae_hidden_layers=[512, 256, 128], ae_batch_size=128, data_dim=2000, n_exp=8):
     base_path = data_dir
-    target_dir = f'{base_path}/AE2/'
+    target_dir = f'{base_path}/AE/'
     
     if not os.path.exists(target_dir):
         os.makedirs(target_dir, exist_ok=True)
