@@ -479,7 +479,7 @@ class VQ_AENB_Conditional(nn.Module):
         self,
         dataloader,
         method: str = "kmeans",
-        num_samples: int = 10000
+        num_samples: int = None
     ):
         """
         Initialize codebook using training data.
@@ -487,8 +487,14 @@ class VQ_AENB_Conditional(nn.Module):
         Args:
             dataloader: DataLoader containing (data, study_ids, ...)
             method: Initialization method ("kmeans", "random", "uniform")
-            num_samples: Number of samples to use for initialization
+            num_samples: Number of samples to use for initialization.
+                         If None, uses all data or at least 40 * num_codes for kmeans.
         """
+        # For k-means, faiss recommends at least 39 * k training points
+        min_samples_for_kmeans = self.num_codes * 40 if method == "kmeans" else 10000
+        if num_samples is None:
+            num_samples = min_samples_for_kmeans
+
         embeddings = []
         count = 0
 
