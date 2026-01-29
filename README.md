@@ -53,11 +53,11 @@ scMILD/
 
 ```bash
 # 저장소 클론
-git clone https://github.com/your-repo/scMILD.git
+git clone https://github.com/Khreat0205/scMILD.git
 cd scMILD
 
 # 환경 설정 (conda 권장)
-conda create -n scmild python=3.9
+conda create -n scmild python=3.12
 conda activate scmild
 
 # 의존성 설치
