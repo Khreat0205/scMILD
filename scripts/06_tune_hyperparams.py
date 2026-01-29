@@ -95,11 +95,11 @@ def create_dataloaders(
             split_adata.obs[label_col].values, dtype=torch.long, device=device
         )
 
-        # Embedding IDs (study or organ)
+        # Embedding IDs (study or organ) - use direct column value
         embedding_ids = None
-        if embedding_mapping:
+        if embedding_col in split_adata.obs.columns:
             embedding_ids = torch.tensor(
-                [embedding_mapping.get(int(s), 0) for s in split_adata.obs[sample_col].values],
+                split_adata.obs[embedding_col].values.astype(int),
                 dtype=torch.long, device=device
             )
 
