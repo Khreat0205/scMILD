@@ -420,7 +420,9 @@ def main():
                 print(f"  *** New best! ***")
 
         except Exception as e:
+            import traceback
             print(f"  Error: {e}")
+            traceback.print_exc()
             continue
 
     # Save results

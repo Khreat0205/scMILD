@@ -30,6 +30,8 @@ from .preprocessing import (
     get_cache_path,
     print_adata_summary,
     subsample_adata,
+    encode_labels,
+    get_study_mapping,
 )
 
 __all__ = [
@@ -54,4 +56,6 @@ __all__ = [
     "get_cache_path",
     "print_adata_summary",
     "subsample_adata",
+    "encode_labels",
+    "get_study_mapping",
 ]
