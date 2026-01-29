@@ -17,14 +17,14 @@ from datetime import datetime
 from itertools import product
 import copy
 
+# Add project root to path BEFORE other imports
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 import torch
 import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader
-
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config, ScMILDConfig
 from src.data import (
