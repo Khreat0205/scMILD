@@ -34,6 +34,9 @@ class FoldResult:
     model_teacher_state: dict
     model_student_state: dict
     model_encoder_state: dict
+    # For overall AUROC calculation (LOOCV)
+    y_true: Optional[np.ndarray] = None
+    y_pred_proba: Optional[np.ndarray] = None
 
 
 class MILTrainer:
@@ -191,6 +194,8 @@ class MILTrainer:
             model_teacher_state=best_model_wts_teacher,
             model_student_state=best_model_wts_student,
             model_encoder_state=best_model_wts_encoder,
+            y_true=y_true,
+            y_pred_proba=y_pred_proba,
         )
 
     def _train_teacher_epoch(

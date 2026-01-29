@@ -153,7 +153,9 @@ class VQEncoderWrapperConditional(nn.Module):
         if study_ids is None:
             # Fallback: use study_id=0 for all samples
             study_ids = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
-            print("WARNING: study_ids not provided to conditional encoder, using 0")
+            if not getattr(self, '_warned_study_ids', False):
+                print("WARNING: study_ids not provided to conditional encoder, using 0")
+                self._warned_study_ids = True
 
         with torch.no_grad():
             encoded = self.vq_model.features(x, study_ids)

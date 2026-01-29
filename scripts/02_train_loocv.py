@@ -92,11 +92,11 @@ def create_dataloaders(
             split_adata.obs[label_col].values, dtype=torch.long, device=device
         )
 
-        # Embedding IDs (study or organ)
+        # Embedding IDs (study or organ) - use direct column value
         embedding_ids = None
-        if embedding_mapping:
+        if embedding_col in split_adata.obs.columns:
             embedding_ids = torch.tensor(
-                [embedding_mapping.get(int(s), 0) for s in split_adata.obs[sample_col].values],
+                split_adata.obs[embedding_col].values.astype(int),
                 dtype=torch.long, device=device
             )
 
@@ -358,18 +358,62 @@ def main():
     # Save final results
     metrics_logger.save()
 
+    # Calculate overall AUROC by concatenating all fold predictions
+    all_y_true = np.concatenate([r.y_true for r in all_results])
+    all_y_pred_proba = np.concatenate([r.y_pred_proba for r in all_results])
+
+    # Import metrics functions
+    from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
+
+    # Calculate overall metrics
+    overall_auc = roc_auc_score(all_y_true, all_y_pred_proba)
+
+    # Find optimal threshold on concatenated predictions
+    from src.training.metrics import find_optimal_threshold
+    optimal_threshold, _ = find_optimal_threshold(all_y_true, all_y_pred_proba)
+    all_y_pred = (all_y_pred_proba >= optimal_threshold).astype(int)
+
+    overall_acc = accuracy_score(all_y_true, all_y_pred)
+    overall_f1 = f1_score(all_y_true, all_y_pred, zero_division=0)
+
     # Print summary
     print(f"\n{'='*60}")
     print("LOOCV Results Summary")
     print(f"{'='*60}")
 
-    aucs = [r.metrics['auc'] for r in all_results]
-    accs = [r.metrics['accuracy'] for r in all_results]
-    f1s = [r.metrics['f1_score'] for r in all_results]
+    # Overall metrics (concatenated predictions - proper LOOCV evaluation)
+    print(f"\n[Overall Metrics - Concatenated Predictions]")
+    print(f"AUC:      {overall_auc:.4f}")
+    print(f"Accuracy: {overall_acc:.4f}")
+    print(f"F1 Score: {overall_f1:.4f}")
+    print(f"Optimal Threshold: {optimal_threshold:.4f}")
 
-    print(f"AUC:      {np.mean(aucs):.4f} ± {np.std(aucs):.4f}")
-    print(f"Accuracy: {np.mean(accs):.4f} ± {np.std(accs):.4f}")
-    print(f"F1 Score: {np.mean(f1s):.4f} ± {np.std(f1s):.4f}")
+    # Per-fold metrics (for reference)
+    accs = [r.metrics['accuracy'] for r in all_results]
+    print(f"\n[Per-Fold Accuracy]")
+    print(f"Mean:     {np.mean(accs):.4f} ± {np.std(accs):.4f}")
+
+    # Save overall metrics to a separate file
+    overall_results = {
+        'overall_auc': overall_auc,
+        'overall_accuracy': overall_acc,
+        'overall_f1': overall_f1,
+        'optimal_threshold': optimal_threshold,
+        'n_samples': len(all_y_true),
+        'n_positive': int(all_y_true.sum()),
+        'n_negative': int(len(all_y_true) - all_y_true.sum()),
+    }
+    pd.DataFrame([overall_results]).to_csv(output_dir / "overall_results.csv", index=False)
+
+    # Save concatenated predictions for further analysis
+    pred_df = pd.DataFrame({
+        'sample_name': [r.test_sample for r in all_results],
+        'y_true': all_y_true,
+        'y_pred_proba': all_y_pred_proba,
+        'y_pred': all_y_pred,
+    })
+    pred_df.to_csv(output_dir / "predictions.csv", index=False)
+
     print(f"\nResults saved to: {output_dir}")
 
 
