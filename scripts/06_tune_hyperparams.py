@@ -65,6 +65,24 @@ def create_dataloaders(
     sample_col = config.data.columns.sample_id
     label_col = config.data.columns.disease_label
     embedding_col = config.data.conditional_embedding.encoded_column
+    embedding_source_col = config.data.conditional_embedding.column  # e.g., "study"
+    embedding_mapping_path = config.data.conditional_embedding.mapping_path
+
+    # If encoded column doesn't exist, create it from source column using pretrain mapping
+    if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
+        if embedding_mapping_path and Path(embedding_mapping_path).exists():
+            # Load pretrain mapping (study_id -> study_name) and invert to (study_name -> study_id)
+            from src.data import load_study_mapping
+            id_to_name = load_study_mapping(embedding_mapping_path)
+            name_to_id = {v: k for k, v in id_to_name.items()}
+            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"  Mapping: {name_to_id}")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
+        else:
+            # Fallback: create from category codes (WARNING: may not match pretrain)
+            print(f"WARNING: Creating '{embedding_col}' from '{embedding_source_col}' without pretrain mapping!")
+            print(f"  This may cause inconsistency with pretrained encoder.")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].astype('category').cat.codes
 
     def _create_datasets(sample_list):
         # Filter cells for these samples
@@ -102,9 +120,6 @@ def create_dataloaders(
                 split_adata.obs[embedding_col].values.astype(int),
                 dtype=torch.long, device=device
             )
-        else:
-            print(f"WARNING: embedding_col '{embedding_col}' not found in adata.obs.columns")
-            print(f"  Available columns: {list(split_adata.obs.columns)[:10]}...")
 
         return data, sample_ids, labels, instance_labels, embedding_ids
 

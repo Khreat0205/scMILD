@@ -114,6 +114,7 @@ def main():
     print_adata_summary(adata, "Original Data")
 
     # Encode labels if not already done
+    encoding_info = None
     if 'study_id_numeric' not in adata.obs.columns:
         print("Encoding labels...")
         adata, encoding_info = encode_labels(
@@ -126,6 +127,21 @@ def main():
     # Get number of studies
     n_studies = adata.obs['study_id_numeric'].nunique()
     print(f"Number of studies: {n_studies}")
+
+    # Build study mapping (study_id -> study_name) for MIL training with subset data
+    if encoding_info and 'study' in encoding_info:
+        # encoding_info['study']['mapping'] is {study_name: study_id}
+        # We need {study_id: study_name}
+        study_name_to_id = encoding_info['study']['mapping']
+        study_id_to_name = {v: k for k, v in study_name_to_id.items()}
+    else:
+        # Build from adata if encoding was already done
+        study_id_to_name = {}
+        study_df = adata.obs[['study', 'study_id_numeric']].drop_duplicates()
+        for _, row in study_df.iterrows():
+            study_id_to_name[int(row['study_id_numeric'])] = row['study']
+
+    print(f"Study ID mapping: {study_id_to_name}")
 
     # Get input dimension
     input_dim = adata.n_vars
@@ -202,11 +218,17 @@ def main():
     with open(history_path, 'w') as f:
         json.dump({k: [float(v) for v in vals] for k, vals in history.items()}, f, indent=2)
 
+    # Save study mapping (study_id -> study_name) for MIL training with subset data
+    study_mapping_path = output_path / "study_mapping.json"
+    with open(study_mapping_path, 'w') as f:
+        json.dump({str(k): v for k, v in study_id_to_name.items()}, f, indent=2)
+
     print(f"\n{'='*60}")
     print("Training complete!")
     print(f"{'='*60}")
     print(f"Model saved to: {model_path}")
     print(f"History saved to: {history_path}")
+    print(f"Study mapping saved to: {study_mapping_path}")
 
 
 if __name__ == "__main__":

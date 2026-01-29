@@ -39,6 +39,7 @@ class ConditionalEmbeddingConfig:
     """Conditional encoder용 임베딩 컬럼 설정"""
     column: str = "study"                      # 원본 컬럼명 (study, Organ 등)
     encoded_column: str = "study_id_numeric"   # 인코딩된 컬럼명
+    mapping_path: Optional[str] = None         # Pretrain 시 생성된 study_name -> study_id 매핑 파일
 
 
 @dataclass
