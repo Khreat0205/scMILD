@@ -159,19 +159,33 @@ class Quantizer(nn.Module):
         # Identify dead codes (usage below threshold)
         dead_codes = self.code_usage < (1e-3 / self.num_codes)
 
-        if dead_codes.sum() > 0:
+        if dead_codes.sum() > 0 and z.shape[0] > 0:
+            num_dead = int(dead_codes.sum().item())
+
             # Sample from inputs with low similarity to all codes
             max_sim = torch.max(similarity, dim=1).values
-            sample_probs = F.softmax(-max_sim, dim=0)
 
-            # Sample indices for reinitialization
-            num_dead = dead_codes.sum().item()
-            sample_indices = torch.multinomial(
-                sample_probs, num_samples=int(num_dead), replacement=True
-            )
+            # Ensure numerical stability for softmax
+            neg_max_sim = -max_sim
+            neg_max_sim = neg_max_sim - neg_max_sim.max()  # Prevent overflow
+            sample_probs = F.softmax(neg_max_sim, dim=0)
+
+            # Add small epsilon to prevent zero probabilities
+            sample_probs = sample_probs + 1e-8
+            sample_probs = sample_probs / sample_probs.sum()
+
+            # Check if we have valid probabilities
+            if torch.isnan(sample_probs).any() or sample_probs.sum() <= 0:
+                # Fallback to uniform sampling
+                sample_indices = torch.randint(0, z.shape[0], (num_dead,), device=z.device)
+            else:
+                # Sample indices for reinitialization
+                sample_indices = torch.multinomial(
+                    sample_probs, num_samples=min(num_dead, z.shape[0]), replacement=True
+                )
 
             # Reinitialize dead codes
-            dead_indices = torch.where(dead_codes)[0]
+            dead_indices = torch.where(dead_codes)[0][:len(sample_indices)]
             with torch.no_grad():
                 self.codebook.weight[dead_indices] = z.detach()[sample_indices]
 

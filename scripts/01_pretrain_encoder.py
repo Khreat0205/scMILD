@@ -81,7 +81,7 @@ def main():
     # Load config if provided
     if args.config:
         config = load_config(args.config)
-        adata_path = args.adata_path or config.data.adata_path
+        adata_path = args.adata_path or config.data.whole_adata_path
         output_dir = args.output_dir or config.paths.output_root
         latent_dim = args.latent_dim or config.encoder.latent_dim
         num_codes = args.num_codes or config.encoder.num_codes

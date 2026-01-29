@@ -211,9 +211,10 @@ class ScMILDConfig:
 # YAML Loading utilities
 # ============================================================================
 
-def _resolve_variables(config: dict, root: dict = None) -> dict:
+def _resolve_variables(config: dict, root: dict = None, max_iterations: int = 10) -> dict:
     """
     ${paths.data_root} 같은 변수 참조를 해결합니다.
+    중첩된 변수 참조 (예: ${paths.project_root}가 ${paths.data_root}를 참조)를 지원합니다.
     """
     if root is None:
         root = config
@@ -229,29 +230,58 @@ def _resolve_variables(config: dict, root: dict = None) -> dict:
                 return None
         return value
 
-    def _resolve_string(s: str) -> str:
+    def _has_variables(s: str) -> bool:
+        """문자열에 ${...} 패턴이 있는지 확인합니다."""
+        return '${' in s
+
+    def _resolve_string(s: str, current_root: dict) -> str:
         """문자열 내의 ${...} 패턴을 해결합니다."""
         pattern = r'\$\{([^}]+)\}'
         matches = re.findall(pattern, s)
         for match in matches:
-            replacement = _get_nested(root, match)
+            replacement = _get_nested(current_root, match)
             if replacement is not None:
                 s = s.replace(f"${{{match}}}", str(replacement))
         return s
 
-    result = {}
-    for key, value in config.items():
-        if isinstance(value, dict):
-            result[key] = _resolve_variables(value, root)
-        elif isinstance(value, str):
-            result[key] = _resolve_string(value)
-        elif isinstance(value, list):
-            result[key] = [
-                _resolve_string(v) if isinstance(v, str) else v
-                for v in value
-            ]
-        else:
-            result[key] = value
+    def _resolve_dict(d: dict, current_root: dict) -> dict:
+        """딕셔너리 내의 모든 변수를 해결합니다."""
+        result = {}
+        for key, value in d.items():
+            if isinstance(value, dict):
+                result[key] = _resolve_dict(value, current_root)
+            elif isinstance(value, str):
+                result[key] = _resolve_string(value, current_root)
+            elif isinstance(value, list):
+                result[key] = [
+                    _resolve_string(v, current_root) if isinstance(v, str) else v
+                    for v in value
+                ]
+            else:
+                result[key] = value
+        return result
+
+    def _has_unresolved_variables(d: dict) -> bool:
+        """딕셔너리에 미해결 변수가 있는지 확인합니다."""
+        for value in d.values():
+            if isinstance(value, dict):
+                if _has_unresolved_variables(value):
+                    return True
+            elif isinstance(value, str):
+                if _has_variables(value):
+                    return True
+            elif isinstance(value, list):
+                for v in value:
+                    if isinstance(v, str) and _has_variables(v):
+                        return True
+        return False
+
+    # 반복적으로 변수 해석 (중첩 변수 지원)
+    result = config.copy()
+    for _ in range(max_iterations):
+        result = _resolve_dict(result, result)
+        if not _has_unresolved_variables(result):
+            break
 
     return result
 

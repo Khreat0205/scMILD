@@ -6,14 +6,17 @@
 # 경로 설정 (병원망 환경 기준)
 # ============================================================================
 paths:
-  # 기본 데이터 디렉토리 (환경변수 또는 직접 지정)
+  # 기본 데이터 디렉토리 (input data 위치)
   data_root: "/home/bmi-user/workspace/data/HSvsCD"
 
+  # 프로젝트 디렉토리 (scMILDQ_Cond - 모든 산출물 저장)
+  project_root: "${paths.data_root}/scMILDQ_Cond"
+
   # Pretrained encoder 경로
-  pretrained_encoder: "${paths.data_root}/data_conditional/AE/vq_aenb_conditional_whole.pth"
+  pretrained_encoder: "${paths.project_root}/results/pretrained/vq_aenb_conditional_whole.pth"
 
   # 결과 저장 디렉토리
-  output_root: "${paths.data_root}/results"
+  output_root: "${paths.project_root}/results"
 
   # conda 환경
   conda_env: "/home/bmi-user/workspace/data/scvi-env"
@@ -22,7 +25,7 @@ paths:
 # 데이터 설정
 # ============================================================================
 data:
-  # 전체 AnnData 파일 경로 (pretrain 및 원본 데이터)
+  # 전체 AnnData 파일 경로 (input data - 외부 경로)
   whole_adata_path: "${paths.data_root}/data/Whole_SCP_PCD_Skin_805k_6k.h5ad"
 
   # Subset 설정 (MIL 학습용)
@@ -31,8 +34,8 @@ data:
     enabled: false
     column: "study"           # subset 기준 컬럼
     values: []                # 포함할 값들 (dataset별 config에서 override)
-    # 캐시 설정
-    cache_dir: "${paths.data_root}/data/cache"
+    # 캐시 설정 (프로젝트 내 저장)
+    cache_dir: "${paths.project_root}/cache"
     use_cache: true           # true면 캐시 있을 시 로드, 없으면 생성 후 저장
 
   # 관측 컬럼명

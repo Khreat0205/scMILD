@@ -10,9 +10,8 @@ _base_: "default.yaml"
 # Skin3 특화 경로
 # ============================================================================
 paths:
-  data_root: "/home/bmi-user/workspace/data/HSvsCD"
-  pretrained_encoder: "${paths.data_root}/data_conditional/AE/vq_aenb_conditional_whole.pth"
-  output_root: "${paths.data_root}/results/skin3"
+  # 결과 저장 경로 (skin3 전용)
+  output_root: "${paths.project_root}/results/skin3"
 
 # ============================================================================
 # Skin3 데이터 설정
@@ -25,8 +24,6 @@ data:
     values:
       - "GSE175990"
       - "GSE220116"
-    cache_dir: "${paths.data_root}/data/cache"
-    use_cache: true
 
   # 데이터셋 정보 (참고용)
   info:
