@@ -17,6 +17,7 @@ Usage:
 import os
 import sys
 import argparse
+import gc
 from pathlib import Path
 from datetime import datetime
 from itertools import product
@@ -78,11 +79,11 @@ def create_dataloaders(
     # If encoded column doesn't exist, create it from source column using pretrain mapping
     if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
         if embedding_mapping_path and Path(embedding_mapping_path).exists():
-            # Load pretrain mapping (study_id -> study_name) and invert to (study_name -> study_id)
-            from src.data import load_study_mapping
-            id_to_name = load_study_mapping(embedding_mapping_path)
+            # Load pretrain mapping (id -> name) and invert to (name -> id)
+            from src.data import load_conditional_mapping
+            id_to_name = load_conditional_mapping(embedding_mapping_path)
             name_to_id = {v: k for k, v in id_to_name.items()}
-            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"Using pretrain {embedding_source_col} mapping from: {embedding_mapping_path}")
             print(f"  Mapping: {name_to_id}")
             adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
         else:
@@ -269,8 +270,23 @@ def run_loocv_for_hyperparams(
     all_results = []
     fold_models = [] if return_models else None
 
+    # Variables for cleanup
+    model_teacher = None
+    model_student = None
+    model_encoder = None
+    train_bag_dl = None
+    train_instance_dl = None
+    test_bag_dl = None
+
     for fold_info in splitter.split(sample_ids, labels, sample_names):
         fold_idx = fold_info.fold_idx
+
+        # Clean up previous fold's GPU memory
+        if fold_idx > 0:
+            del model_teacher, model_student, model_encoder
+            del train_bag_dl, train_instance_dl, test_bag_dl
+            gc.collect()
+            torch.cuda.empty_cache()
 
         # Create fresh models for each fold
         model_teacher, model_student, model_encoder = create_models(
@@ -345,6 +361,12 @@ def run_loocv_for_hyperparams(
             correct = "✓" if pred_label == true_label else "✗"
             print(f"  Fold {fold_idx + 1}/{n_folds}: prob={result.y_pred_proba[0]:.4f} "
                   f"(pred={pred_label}, true={true_label}) {correct}")
+
+    # Final cleanup after all folds
+    del model_teacher, model_student, model_encoder
+    del train_bag_dl, train_instance_dl, test_bag_dl
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # For LOOCV: concatenate all predictions and compute overall metrics
     from sklearn.metrics import roc_auc_score, accuracy_score, f1_score

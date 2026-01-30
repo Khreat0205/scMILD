@@ -29,7 +29,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config, ScMILDConfig
-from src.data import load_adata_with_subset, print_adata_summary, load_study_mapping, MilDataset, collate_mil
+from src.data import load_adata_with_subset, print_adata_summary, load_conditional_mapping, MilDataset, collate_mil
 from src.models import (
     GatedAttentionModule, TeacherBranch, StudentBranch,
     VQEncoderWrapperConditional
@@ -110,9 +110,9 @@ def ensure_embedding_column(adata, config: ScMILDConfig):
 
     if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
         if embedding_mapping_path and Path(embedding_mapping_path).exists():
-            id_to_name = load_study_mapping(embedding_mapping_path)
+            id_to_name = load_conditional_mapping(embedding_mapping_path)
             name_to_id = {v: k for k, v in id_to_name.items()}
-            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"Using pretrain {embedding_source_col} mapping from: {embedding_mapping_path}")
             print(f"  Mapping: {name_to_id}")
             adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
         else:

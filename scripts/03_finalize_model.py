@@ -130,11 +130,11 @@ def create_full_dataloaders(
     # If encoded column doesn't exist, create it from source column using pretrain mapping
     if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
         if embedding_mapping_path and Path(embedding_mapping_path).exists():
-            # Load pretrain mapping (study_id -> study_name) and invert to (study_name -> study_id)
-            from src.data import load_study_mapping
-            id_to_name = load_study_mapping(embedding_mapping_path)
+            # Load pretrain mapping (id -> name) and invert to (name -> id)
+            from src.data import load_conditional_mapping
+            id_to_name = load_conditional_mapping(embedding_mapping_path)
             name_to_id = {v: k for k, v in id_to_name.items()}
-            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"Using pretrain {embedding_source_col} mapping from: {embedding_mapping_path}")
             print(f"  Mapping: {name_to_id}")
             adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
         else:

@@ -215,43 +215,49 @@ def encode_labels(
     return adata, encoding_info
 
 
-def get_study_mapping(adata, sample_col: str = "sample_id_numeric", study_col: str = "study_id_numeric") -> dict:
+def get_conditional_mapping(adata, sample_col: str = "sample_id_numeric", conditional_col: str = "study_id_numeric") -> dict:
     """
-    Sample ID → Study ID 매핑을 생성합니다.
+    Sample ID → Conditional ID (study or organ) 매핑을 생성합니다.
 
     Args:
         adata: AnnData object
         sample_col: Column name for sample IDs
-        study_col: Column name for study IDs
+        conditional_col: Column name for conditional IDs (e.g., 'study_id_numeric', 'Organ_id_numeric')
 
     Returns:
-        Dictionary mapping sample_id → study_id
+        Dictionary mapping sample_id → conditional_id
     """
-    if study_col not in adata.obs.columns:
+    if conditional_col not in adata.obs.columns:
         return {}
 
-    mapping_df = adata.obs[[sample_col, study_col]].drop_duplicates()
+    mapping_df = adata.obs[[sample_col, conditional_col]].drop_duplicates()
     return dict(zip(
         mapping_df[sample_col].astype(int),
-        mapping_df[study_col].astype(int)
+        mapping_df[conditional_col].astype(int)
     ))
 
 
-def save_study_mapping(mapping: dict, path: str):
-    """Save study mapping to JSON file."""
+def save_conditional_mapping(mapping: dict, path: str):
+    """Save conditional mapping (id -> name) to JSON file."""
     import json
     with open(path, 'w') as f:
         # Convert keys to strings for JSON
         json.dump({str(k): v for k, v in mapping.items()}, f)
 
 
-def load_study_mapping(path: str) -> dict:
-    """Load study mapping from JSON file."""
+def load_conditional_mapping(path: str) -> dict:
+    """Load conditional mapping (id -> name) from JSON file."""
     import json
     with open(path, 'r') as f:
         mapping = json.load(f)
     # Convert keys back to int
     return {int(k): v for k, v in mapping.items()}
+
+
+# Backward compatibility aliases
+get_study_mapping = get_conditional_mapping
+save_study_mapping = save_conditional_mapping
+load_study_mapping = load_conditional_mapping
 
 
 def print_adata_summary(adata, title: str = "AnnData Summary"):

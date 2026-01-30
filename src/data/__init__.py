@@ -31,6 +31,11 @@ from .preprocessing import (
     print_adata_summary,
     subsample_adata,
     encode_labels,
+    # Conditional mapping functions (general purpose)
+    get_conditional_mapping,
+    load_conditional_mapping,
+    save_conditional_mapping,
+    # Backward compatibility aliases
     get_study_mapping,
     load_study_mapping,
     save_study_mapping,
@@ -59,6 +64,11 @@ __all__ = [
     "print_adata_summary",
     "subsample_adata",
     "encode_labels",
+    # Conditional mapping functions (general purpose)
+    "get_conditional_mapping",
+    "load_conditional_mapping",
+    "save_conditional_mapping",
+    # Backward compatibility aliases
     "get_study_mapping",
     "load_study_mapping",
     "save_study_mapping",
