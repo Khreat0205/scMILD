@@ -1,0 +1,202 @@
+# scMILD Configuration File - Organ Conditional (ver00)
+# ======================================================
+# Pretrain 설정: Organ 기반 conditional embedding, epoch 100, num_codes 512
+
+# ============================================================================
+# 경로 설정 (병원망 환경 기준)
+# ============================================================================
+paths:
+  # 기본 데이터 디렉토리 (input data 위치)
+  data_root: "/home/bmi-user/workspace/data/HSvsCD"
+
+  # 프로젝트 디렉토리 (scMILDQ_Cond - 모든 산출물 저장)
+  project_root: "${paths.data_root}/scMILDQ_Cond"
+
+  # Pretrained encoder 경로
+  pretrained_encoder: "${paths.project_root}/results/pretrained_organ/vq_aenb_conditional_whole.pth"
+
+  # 결과 저장 디렉토리
+  output_root: "${paths.project_root}/results"
+
+  # conda 환경
+  conda_env: "/home/bmi-user/workspace/data/scvi-env"
+
+# ============================================================================
+# 데이터 설정
+# ============================================================================
+data:
+  # 전체 AnnData 파일 경로 (input data - 외부 경로)
+  whole_adata_path: "${paths.data_root}/data/Whole_SCP_PCD_Skin_805k_6k.h5ad"
+
+  # Subset 설정 (MIL 학습용)
+  # enabled: true면 whole_adata에서 subset, false면 whole_adata 전체 사용
+  subset:
+    enabled: false
+    column: "study"           # subset 기준 컬럼
+    values: []                # 포함할 값들 (dataset별 config에서 override)
+    # 캐시 설정 (프로젝트 내 저장)
+    cache_dir: "${paths.project_root}/cache"
+    use_cache: true           # true면 캐시 있을 시 로드, 없으면 생성 후 저장
+
+  # 관측 컬럼명
+  columns:
+    sample_id: "sample_id_numeric"
+    sample_name: "sample"
+    disease_label: "disease_numeric"
+    status: "Status"
+
+  # Conditional encoder용 임베딩 컬럼 설정
+  # 'study', 'Organ' 등 categorical 컬럼 사용 가능
+  # pretrain 시 사용한 컬럼과 동일해야 함
+  conditional_embedding:
+    column: "Organ"                      # 원본 컬럼명 (adata.obs)
+    encoded_column: "Organ_id_numeric"   # 인코딩된 컬럼명 (자동 생성됨)
+    # Pretrain 시 생성된 organ_name -> organ_id 매핑 파일
+    # subset 사용 시 이 매핑을 사용해야 pretrain과 일관성 유지
+    mapping_path: "${paths.project_root}/results/pretrained_organ/organ_mapping.json"
+
+  # 참고: 데이터는 raw count 사용 (HVG selection 외에는 전처리 하지 않음)
+
+# ============================================================================
+# 데이터 분할 설정
+# ============================================================================
+splitting:
+  # 분할 전략: "loocv" | "stratified_kfold" | "repeated_stratified_kfold"
+  strategy: "loocv"
+
+  # K-Fold 설정 (strategy가 kfold 계열일 때만 사용)
+  n_splits: 5
+  n_repeats: 3
+
+  # 랜덤 시드
+  random_seed: 42
+
+# ============================================================================
+# Pretrained Encoder 설정 (VQ-AENB-Conditional)
+# ============================================================================
+encoder:
+  # 모델 타입
+  type: "VQ_AENB_Conditional"
+
+  # 아키텍처
+  latent_dim: 128
+  num_codes: 512
+
+  # 학습 설정 (pretrain용)
+  pretrain:
+    batch_size: 256
+    learning_rate: 0.0001
+    epochs: 100
+    patience: 5
+
+# ============================================================================
+# MIL (scMILD) 설정
+# ============================================================================
+mil:
+  # 아키텍처
+  latent_dim: 128  # MIL branch hidden dimension
+  attention_dim: 128
+  num_classes: 2
+
+  # Encoder 사용 방식
+  freeze_encoder: true
+  use_projection: true
+  projection_dim: 128
+
+  # 학습 설정
+  training:
+    batch_size: 2  # 샘플(bag) 단위
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0005  # projection layer용
+    epochs: 100
+    patience: 15  # LOOCV에서는 early stopping 비활성화 옵션 있음
+    use_early_stopping: false  # LOOCV용: false 권장
+
+  # Student branch 설정
+  student:
+    enabled: true
+    optimize_period: 1  # 매 N epoch마다 student 최적화 (default: 1)
+
+  # 손실 함수 가중치
+  loss:
+    negative_weight: 0.3  # 음성 샘플 가중치
+    orthogonal_projection_lambda: 0.2
+
+    # Disease Ratio Regularization (VQ 코드별 질병 비율 기반)
+    # attention score가 VQ 코드의 질병 비율과 유사해지도록 유도
+    disease_ratio_reg:
+      enabled: false           # true로 설정시 활성화
+      lambda_weight: 0.1       # regularization 강도
+      alpha: 1.0               # Beta prior alpha (smoothing)
+      beta: 1.0                # Beta prior beta (smoothing)
+
+# ============================================================================
+# 평가 설정
+# ============================================================================
+evaluation:
+  # 저장할 메트릭
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "f1_score"
+    - "precision"
+    - "recall"
+
+  # Cell-level 분석
+  cell_scoring:
+    save_attention_scores: true
+    save_predictions: true
+
+# ============================================================================
+# 로깅 설정
+# ============================================================================
+logging:
+  # 로그 레벨: "DEBUG" | "INFO" | "WARNING" | "ERROR"
+  level: "INFO"
+
+  # 결과 저장 형식
+  save_format: "csv"
+
+  # 체크포인트 저장
+  save_checkpoints: true
+  checkpoint_frequency: 10  # epochs
+
+# ============================================================================
+# 하드웨어 설정
+# ============================================================================
+hardware:
+  # GPU 설정
+  device: "cuda"
+  gpu_ids: [0]  # 사용할 GPU ID 리스트
+
+  # 멀티프로세싱
+  num_workers: 4
+
+# ============================================================================
+# 하이퍼파라미터 튜닝 설정
+# ============================================================================
+tuning:
+  enabled: false
+
+  # Search space (Grid Search)
+  # Transfer learning 개념이므로 작은 epoch 사용 권장
+  learning_rate: [0.001]
+  encoder_learning_rate: [0.0001]
+  epochs: [30]  # Pretrained encoder 기반이므로 작은 epoch
+  disease_ratio_lambda: [0.0, 0.05]
+
+  # 최적화 기준 메트릭: "auc" | "accuracy" | "f1_score"
+  metric: "auc"
+
+  # 결과 파일명
+  results_file: "tuning_results.csv"
+
+  # Top-K 모델 저장 (0이면 저장 안함)
+  save_top_k: 3
+
+# ============================================================================
+# TODO (향후 구현 예정)
+# ============================================================================
+# - Repeated Stratified K-Fold 옵션
+# - MLflow/W&B 통합
+# - Optuna 기반 최적화

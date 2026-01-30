@@ -1,0 +1,57 @@
+# scMILD Configuration - Skin3 Organ ver00 (HS Classification)
+# =============================================================
+# HS 8 samples / Ctrl 11 samples = 19 total samples
+# Studies: GSE175990, GSE220116
+# Base: pretrain_epoch100_organ_ver00.yaml (Organ conditional, num_codes 512)
+
+# 기본 설정 상속
+_base_: "pretrain_epoch100_organ_ver00.yaml"
+
+# ============================================================================
+# Skin3 특화 경로
+# ============================================================================
+paths:
+  # 결과 저장 경로 (skin3_organ_ver00 전용)
+  output_root: "${paths.project_root}/results/skin3_organ_ver00"
+
+# ============================================================================
+# Skin3 데이터 설정
+# ============================================================================
+data:
+  # Subset 설정 - Skin3에 해당하는 study만 필터링
+  subset:
+    enabled: true
+    column: "study"
+    values:
+      - "GSE175990"
+      - "GSE220116"
+
+  # 데이터셋 정보 (참고용)
+  info:
+    name: "Skin3"
+    disease: "HS"  # Hidradenitis Suppurativa
+    control_status: "ctrl_skin"
+    disease_status: "HS"
+    n_samples: 19
+    n_disease: 8
+    n_control: 11
+    n_cells: 36595
+
+# ============================================================================
+# LOOCV 설정 (19 folds)
+# ============================================================================
+splitting:
+  strategy: "loocv"
+  # LOOCV는 n_splits를 자동으로 샘플 수로 설정
+
+# ============================================================================
+# MIL 학습 설정 (Skin3 최적화)
+# ============================================================================
+mil:
+  latent_dim: 128  # md128이 더 좋은 성능
+
+  training:
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.001
+    epochs: 100
+    use_early_stopping: false  # LOOCV에서는 비활성화
