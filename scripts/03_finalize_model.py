@@ -277,7 +277,7 @@ def main():
         subset_column=config.data.subset.column,
         subset_values=config.data.subset.values,
         cache_dir=config.data.subset.cache_dir,
-        study_mapping_path=config.data.conditional_embedding.mapping_path,
+        use_cache=config.data.subset.use_cache,
     )
     print_adata_summary(adata, "Loaded Data")
 
