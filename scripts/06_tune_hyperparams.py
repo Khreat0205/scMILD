@@ -296,7 +296,7 @@ def run_loocv_for_hyperparams(
             ratio_reg_lambda=disease_ratio_lambda
         )
 
-        # Train fold
+        # Train fold (skip_fold_metrics=True for LOOCV)
         result = trainer.train_fold(
             train_bag_dl=train_bag_dl,
             train_instance_dl=train_instance_dl,
@@ -306,7 +306,8 @@ def run_loocv_for_hyperparams(
             encoder_learning_rate=encoder_learning_rate,
             use_early_stopping=False,
             fold_idx=fold_idx,
-            test_sample_name=fold_info.test_sample_name or f"Sample_{fold_idx}"
+            test_sample_name=fold_info.test_sample_name or f"Sample_{fold_idx}",
+            skip_fold_metrics=True,  # LOOCV: skip per-fold metrics
         )
 
         all_results.append(result)

@@ -341,7 +341,7 @@ def main():
             ratio_reg_lambda=ratio_reg_lambda
         )
 
-        # Train fold
+        # Train fold (skip_fold_metrics=True for LOOCV)
         result = trainer.train_fold(
             train_bag_dl=train_bag_dl,
             train_instance_dl=train_instance_dl,
@@ -352,22 +352,17 @@ def main():
             use_early_stopping=config.mil.training.use_early_stopping,
             patience=config.mil.training.patience,
             fold_idx=fold_idx,
-            test_sample_name=test_sample_name
-        )
-
-        # Log results
-        metrics_logger.log_fold_result(
-            fold=fold_idx,
-            metrics=result.metrics,
-            sample_name=test_sample_name
+            test_sample_name=test_sample_name,
+            skip_fold_metrics=True,  # LOOCV: skip per-fold metrics
         )
 
         all_results.append(result)
 
-        # Print fold result
-        print(f"  AUC: {result.metrics['auc']:.4f}, "
-              f"Acc: {result.metrics['accuracy']:.4f}, "
-              f"F1: {result.metrics['f1_score']:.4f}")
+        # Print fold result (for LOOCV: show prediction instead of metrics)
+        pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
+        true_label = "Disease" if result.y_true[0] == 1 else "Control"
+        correct = "✓" if pred_label == true_label else "✗"
+        print(f"  prob={result.y_pred_proba[0]:.4f} (pred={pred_label}, true={true_label}) {correct}")
 
         # Save fold model
         if config.logging.save_checkpoints:

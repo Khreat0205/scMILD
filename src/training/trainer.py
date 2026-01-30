@@ -97,6 +97,7 @@ class MILTrainer:
         patience: int = 15,
         fold_idx: int = 0,
         test_sample_name: Optional[str] = None,
+        skip_fold_metrics: bool = False,
     ) -> FoldResult:
         """
         Train a single fold.
@@ -112,6 +113,7 @@ class MILTrainer:
             patience: Patience for early stopping
             fold_idx: Index of current fold
             test_sample_name: Name of test sample (for LOOCV)
+            skip_fold_metrics: Skip per-fold metrics calculation (for LOOCV)
 
         Returns:
             FoldResult with trained models and metrics
@@ -179,12 +181,18 @@ class MILTrainer:
             self.model_student.load_state_dict(best_model_wts_student)
             self.model_encoder.load_state_dict(best_model_wts_encoder)
 
-        # Final evaluation on test set
-        test_loss, test_auc, threshold = self._evaluate(test_bag_dl)
-
-        # Get full metrics
+        # Get predictions for this fold
         y_true, y_pred_proba = self._get_predictions(test_bag_dl)
-        metrics = compute_metrics(y_true, y_pred_proba, threshold)
+
+        # For LOOCV (skip_fold_metrics=True): skip per-fold metrics calculation
+        # Metrics will be calculated on concatenated predictions later
+        if skip_fold_metrics:
+            metrics = {}  # Empty metrics for LOOCV
+            threshold = 0.5  # Default threshold
+        else:
+            # Full evaluation for non-LOOCV cases
+            test_loss, test_auc, threshold = self._evaluate(test_bag_dl)
+            metrics = compute_metrics(y_true, y_pred_proba, threshold)
 
         return FoldResult(
             fold_idx=fold_idx,

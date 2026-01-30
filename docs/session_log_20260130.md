@@ -58,6 +58,33 @@
 
 ---
 
+### 3. LOOCV에서 불필요한 fold별 메트릭 계산 제거
+
+#### 문제점
+- LOOCV에서 fold별 AUC, accuracy 등을 계산하면 sklearn 경고 발생
+  - `Only one class is present in y_true. ROC AUC score is not defined in that case.`
+- 불필요한 함수 호출로 인한 오버헤드
+
+#### 해결책
+1. **`train_fold()` 메서드에 `skip_fold_metrics` 파라미터 추가** (`src/training/trainer.py`)
+   - `skip_fold_metrics=True`일 때 `_evaluate()`, `compute_metrics()` 호출 건너뜀
+   - 예측값(`y_true`, `y_pred_proba`)만 반환
+
+2. **스크립트에서 `skip_fold_metrics=True` 전달**
+   - `scripts/02_train_loocv.py`
+   - `scripts/06_tune_hyperparams.py`
+
+3. **fold별 출력 변경**
+   - 기존: `AUC: 0.5000, Acc: 1.0000, F1: 0.0000` (무의미한 메트릭)
+   - 변경: `prob=0.1906 (pred=Control, true=Control) ✓` (예측 결과)
+
+#### 수정된 파일
+- `src/training/trainer.py`: `skip_fold_metrics` 파라미터 추가
+- `scripts/02_train_loocv.py`: `skip_fold_metrics=True` 전달, fold별 출력 변경
+- `scripts/06_tune_hyperparams.py`: `skip_fold_metrics=True` 전달
+
+---
+
 ## 실행 흐름 (수정 후)
 
 ```bash
@@ -125,3 +152,4 @@ results/
 3. **LOOCV 평가 시**
    - fold별 AUC는 의미 없음 (테스트 샘플 1개)
    - `overall_results.csv`의 전체 AUROC 사용
+   - `skip_fold_metrics=True`로 불필요한 계산 건너뜀

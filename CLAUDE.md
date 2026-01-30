@@ -231,6 +231,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
   - `FoldResult`에 `y_true`, `y_pred_proba` 필드 추가
   - `overall_results.csv`, `predictions.csv` 출력 추가
 
+- **LOOCV fold별 메트릭 계산 제거**
+  - `train_fold()`에 `skip_fold_metrics` 파라미터 추가
+  - LOOCV에서 불필요한 `_evaluate()`, `compute_metrics()` 호출 건너뜀
+  - sklearn 경고 제거 및 성능 개선
+
 - **수정된 파일**
   - `scripts/01_pretrain_encoder.py`
   - `scripts/02_train_loocv.py`
