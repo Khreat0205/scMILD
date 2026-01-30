@@ -155,7 +155,8 @@ def encode_labels(
     adata,
     sample_col: str = "sample",
     label_col: str = "Status",
-    study_col: Optional[str] = "study",
+    conditional_col: Optional[str] = "study",
+    conditional_encoded_col: Optional[str] = None,
     inplace: bool = True
 ):
     """
@@ -165,7 +166,9 @@ def encode_labels(
         adata: AnnData object
         sample_col: Column name for samples
         label_col: Column name for disease labels
-        study_col: Column name for study (optional)
+        conditional_col: Column name for conditional embedding (e.g., 'study', 'Organ')
+        conditional_encoded_col: Output column name for encoded conditional values
+                                 (default: '{conditional_col}_id_numeric')
         inplace: Whether to modify in place
 
     Returns:
@@ -195,13 +198,18 @@ def encode_labels(
         'mapping': dict(zip(le_label.classes_, range(len(le_label.classes_))))
     }
 
-    # Encode study IDs (optional)
-    if study_col and study_col in adata.obs.columns:
-        le_study = LabelEncoder()
-        adata.obs['study_id_numeric'] = le_study.fit_transform(adata.obs[study_col])
-        encoding_info['study'] = {
-            'encoder': le_study,
-            'mapping': dict(zip(le_study.classes_, range(len(le_study.classes_))))
+    # Encode conditional column (e.g., study, Organ)
+    if conditional_col and conditional_col in adata.obs.columns:
+        le_conditional = LabelEncoder()
+        # Determine output column name
+        if conditional_encoded_col is None:
+            conditional_encoded_col = f"{conditional_col}_id_numeric"
+        adata.obs[conditional_encoded_col] = le_conditional.fit_transform(adata.obs[conditional_col])
+        encoding_info['conditional'] = {
+            'column': conditional_col,
+            'encoded_column': conditional_encoded_col,
+            'encoder': le_conditional,
+            'mapping': dict(zip(le_conditional.classes_, range(len(le_conditional.classes_))))
         }
 
     return adata, encoding_info

@@ -40,21 +40,29 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def create_dataloader(adata, device, batch_size=256, shuffle=True):
-    """Create dataloader from AnnData."""
+def create_dataloader(adata, device, conditional_col: str, batch_size=256, shuffle=True):
+    """Create dataloader from AnnData.
+
+    Args:
+        adata: AnnData object
+        device: torch device
+        conditional_col: Column name for conditional IDs (e.g., 'study_id_numeric', 'Organ_id_numeric')
+        batch_size: Batch size
+        shuffle: Whether to shuffle
+    """
     # Extract data
     if hasattr(adata.X, 'toarray'):
         data = torch.tensor(adata.X.toarray(), dtype=torch.float32)
     else:
         data = torch.tensor(np.array(adata.X), dtype=torch.float32)
 
-    # Extract study IDs
-    study_ids = torch.tensor(
-        adata.obs['study_id_numeric'].values, dtype=torch.long
+    # Extract conditional IDs
+    conditional_ids = torch.tensor(
+        adata.obs[conditional_col].values, dtype=torch.long
     )
 
     # Create dataset
-    dataset = TensorDataset(data, study_ids)
+    dataset = TensorDataset(data, conditional_ids)
 
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
@@ -85,11 +93,17 @@ def main():
         output_dir = args.output_dir or config.paths.output_root
         latent_dim = args.latent_dim or config.encoder.latent_dim
         num_codes = args.num_codes or config.encoder.num_codes
+        # Conditional embedding settings from config
+        conditional_col = config.data.conditional_embedding.column  # e.g., 'study' or 'Organ'
+        conditional_encoded_col = config.data.conditional_embedding.encoded_column  # e.g., 'study_id_numeric' or 'Organ_id_numeric'
     else:
         adata_path = args.adata_path
         output_dir = args.output_dir or "./results/pretrain"
         latent_dim = args.latent_dim
         num_codes = args.num_codes
+        # Default to 'study' for backward compatibility
+        conditional_col = "study"
+        conditional_encoded_col = "study_id_numeric"
 
     if not adata_path:
         print("Error: Please provide --adata_path or --config")
@@ -115,33 +129,34 @@ def main():
 
     # Encode labels if not already done
     encoding_info = None
-    if 'study_id_numeric' not in adata.obs.columns:
-        print("Encoding labels...")
+    if conditional_encoded_col not in adata.obs.columns:
+        print(f"Encoding labels (conditional column: {conditional_col})...")
         adata, encoding_info = encode_labels(
             adata,
             sample_col='sample',
             label_col='Status',
-            study_col='study'
+            conditional_col=conditional_col,
+            conditional_encoded_col=conditional_encoded_col
         )
 
-    # Get number of studies
-    n_studies = adata.obs['study_id_numeric'].nunique()
-    print(f"Number of studies: {n_studies}")
+    # Get number of conditional categories (e.g., studies or organs)
+    n_conditionals = adata.obs[conditional_encoded_col].nunique()
+    print(f"Number of {conditional_col}s: {n_conditionals}")
 
-    # Build study mapping (study_id -> study_name) for MIL training with subset data
-    if encoding_info and 'study' in encoding_info:
-        # encoding_info['study']['mapping'] is {study_name: study_id}
-        # We need {study_id: study_name}
-        study_name_to_id = encoding_info['study']['mapping']
-        study_id_to_name = {v: k for k, v in study_name_to_id.items()}
+    # Build conditional mapping (id -> name) for MIL training with subset data
+    if encoding_info and 'conditional' in encoding_info:
+        # encoding_info['conditional']['mapping'] is {name: id}
+        # We need {id: name}
+        name_to_id = encoding_info['conditional']['mapping']
+        id_to_name = {v: k for k, v in name_to_id.items()}
     else:
         # Build from adata if encoding was already done
-        study_id_to_name = {}
-        study_df = adata.obs[['study', 'study_id_numeric']].drop_duplicates()
-        for _, row in study_df.iterrows():
-            study_id_to_name[int(row['study_id_numeric'])] = row['study']
+        id_to_name = {}
+        cond_df = adata.obs[[conditional_col, conditional_encoded_col]].drop_duplicates()
+        for _, row in cond_df.iterrows():
+            id_to_name[int(row[conditional_encoded_col])] = row[conditional_col]
 
-    print(f"Study ID mapping: {study_id_to_name}")
+    print(f"{conditional_col} ID mapping: {id_to_name}")
 
     # Get input dimension
     input_dim = adata.n_vars
@@ -154,6 +169,7 @@ def main():
     print("\nCreating dataloader...")
     train_loader = create_dataloader(
         adata, device,
+        conditional_col=conditional_encoded_col,
         batch_size=args.batch_size,
         shuffle=True
     )
@@ -165,7 +181,7 @@ def main():
         latent_dim=latent_dim,
         device=device,
         hidden_layers=hidden_layers,
-        n_studies=n_studies,
+        n_studies=n_conditionals,  # n_studies is used for conditional embedding size
         study_emb_dim=args.study_emb_dim,
         num_codes=num_codes,
         commitment_weight=0.25
@@ -174,7 +190,8 @@ def main():
 
     print(f"  Latent dim: {latent_dim}")
     print(f"  Num codes: {num_codes}")
-    print(f"  Study embedding dim: {args.study_emb_dim}")
+    print(f"  Conditional ({conditional_col}) embedding dim: {args.study_emb_dim}")
+    print(f"  Number of {conditional_col}s: {n_conditionals}")
     print(f"  Hidden layers: {hidden_layers}")
 
     # Create trainer
@@ -200,7 +217,10 @@ def main():
         'input_dim': input_dim,
         'latent_dim': latent_dim,
         'hidden_layers': hidden_layers,
-        'n_studies': n_studies,
+        'n_studies': n_conditionals,  # Keep 'n_studies' key for backward compatibility
+        'n_conditionals': n_conditionals,
+        'conditional_column': conditional_col,
+        'conditional_encoded_column': conditional_encoded_col,
         'study_emb_dim': args.study_emb_dim,
         'num_codes': num_codes,
     }
@@ -218,17 +238,19 @@ def main():
     with open(history_path, 'w') as f:
         json.dump({k: [float(v) for v in vals] for k, vals in history.items()}, f, indent=2)
 
-    # Save study mapping (study_id -> study_name) for MIL training with subset data
-    study_mapping_path = output_path / "study_mapping.json"
-    with open(study_mapping_path, 'w') as f:
-        json.dump({str(k): v for k, v in study_id_to_name.items()}, f, indent=2)
+    # Save conditional mapping (id -> name) for MIL training with subset data
+    # File name based on conditional column (e.g., 'study_mapping.json' or 'organ_mapping.json')
+    mapping_filename = f"{conditional_col.lower()}_mapping.json"
+    mapping_path = output_path / mapping_filename
+    with open(mapping_path, 'w') as f:
+        json.dump({str(k): v for k, v in id_to_name.items()}, f, indent=2)
 
     print(f"\n{'='*60}")
     print("Training complete!")
     print(f"{'='*60}")
     print(f"Model saved to: {model_path}")
     print(f"History saved to: {history_path}")
-    print(f"Study mapping saved to: {study_mapping_path}")
+    print(f"{conditional_col} mapping saved to: {mapping_path}")
 
 
 if __name__ == "__main__":
