@@ -38,7 +38,7 @@ from src.models import (
     GatedAttentionModule, TeacherBranch, StudentBranch,
     VQEncoderWrapperConditional
 )
-from src.training import MILTrainer
+from src.training import MILTrainer, calculate_disease_ratio_from_dataloader
 
 
 def load_best_params(best_params_path: str) -> dict:
@@ -86,6 +86,7 @@ def apply_best_params(config: 'ScMILDConfig', best_params: dict) -> 'ScMILDConfi
         'negative_weight': ('mil', 'loss', 'negative_weight'),
         'student_optimize_period': ('mil', 'student', 'optimize_period'),
         'epochs': ('mil', 'training', 'epochs'),
+        'disease_ratio_lambda': ('mil', 'loss', 'disease_ratio_reg', 'lambda_weight'),
     }
 
     for param_name, value in best_params.items():
@@ -312,6 +313,20 @@ def main():
         config, device, config.paths.pretrained_encoder
     )
 
+    # Calculate disease ratio if lambda > 0
+    disease_ratio_lambda = config.mil.loss.disease_ratio_reg.lambda_weight
+    disease_ratio = None
+    if disease_ratio_lambda > 0:
+        print(f"\nCalculating disease ratio (lambda={disease_ratio_lambda})...")
+        disease_ratio = calculate_disease_ratio_from_dataloader(
+            instance_dl,
+            model_encoder,
+            device,
+            alpha=config.mil.loss.disease_ratio_reg.alpha,
+            beta=config.mil.loss.disease_ratio_reg.beta,
+            use_conditional=True
+        )
+
     # Create trainer
     trainer = MILTrainer(
         model_teacher=model_teacher,
@@ -320,7 +335,9 @@ def main():
         device=device,
         use_conditional_ae=True,
         student_optimize_period=config.mil.student.optimize_period,
-        student_loss_weight_neg=config.mil.loss.negative_weight
+        student_loss_weight_neg=config.mil.loss.negative_weight,
+        disease_ratio=disease_ratio,
+        ratio_reg_lambda=disease_ratio_lambda
     )
 
     # Train
