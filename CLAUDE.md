@@ -292,6 +292,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 ## 변경 이력
 
+### 2026-01-30 (3차)
+- **`03_finalize_model.py` 개선**
+  - `--best_params` 옵션 추가: `best_params.yaml` 로드하여 config 오버라이드
+  - `load_best_params()`, `apply_best_params()` 함수 추가
+  - `disease_ratio_lambda` 지원: lambda > 0일 때 disease ratio 계산 및 적용
+  - `model_info.json`에 사용된 하이퍼파라미터 기록
+
+- **전체 스크립트 데이터 로딩 통일**
+  - `03_finalize_model.py`, `04_cross_disease_eval.py`, `05_cell_scoring.py` 수정
+  - `load_adata` → `load_adata_with_subset` 변경
+  - `config.data.adata_path` → `config.data.whole_adata_path` + subset 시스템 사용
+  - 모든 스크립트에서 동일한 study mapping 로직 적용
+
+- **지원 하이퍼파라미터 (best_params.yaml)**
+  - `learning_rate`, `encoder_learning_rate`, `epochs`
+  - `attention_dim`, `latent_dim`, `projection_dim`
+  - `negative_weight`, `student_optimize_period`
+  - `disease_ratio_lambda` → `config.mil.loss.disease_ratio_reg.lambda_weight`
+
 ### 2026-01-30 (2차)
 - **문서 정비**
   - README.md, CLAUDE.md 실제 스크립트 구조와 동기화
@@ -331,5 +350,5 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 ## TODO (미구현)
 
-- [x] `03_finalize_model.py`: `--best_params` 옵션으로 best_params.yaml 자동 로드 (2026-01-30 완료)
+- [x] `03_finalize_model.py`: `--best_params` 옵션으로 best_params.yaml 자동 로드 (2026-01-30 3차 완료)
 - [ ] `05_cell_scoring.py`: `--loocv_dir` 옵션으로 LOOCV 모드 지원

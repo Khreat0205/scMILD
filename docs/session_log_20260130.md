@@ -215,3 +215,187 @@ results/
    - Transfer learning이므로 작은 epoch 사용 (10, 30 권장)
    - `save_top_k` 설정으로 상위 K개 조합 모델 저장
    - 중간에 크래시 발생해도 `tuning_results.csv`에 결과 보존
+
+---
+
+# Session Log - 2026-01-30 (3차)
+
+## 주요 작업 내용
+
+### 1. `03_finalize_model.py`에 `--best_params` 옵션 추가
+
+#### 목적
+- 튜닝 스크립트(`06_tune_hyperparams.py`)에서 생성된 `best_params.yaml`을 자동으로 로드하여 config 오버라이드
+
+#### 구현 내용
+
+1. **`load_best_params()` 함수 추가**
+   ```python
+   def load_best_params(best_params_path: str) -> dict:
+       """Load best hyperparameters from YAML file."""
+       with open(best_params_path, 'r') as f:
+           data = yaml.safe_load(f)
+       return data.get('best_hyperparameters', {})
+   ```
+
+2. **`apply_best_params()` 함수 추가**
+   - 지원하는 파라미터와 config 경로 매핑:
+   ```python
+   param_mapping = {
+       'learning_rate': ('mil', 'training', 'learning_rate'),
+       'encoder_learning_rate': ('mil', 'training', 'encoder_learning_rate'),
+       'attention_dim': ('mil', 'attention_dim'),
+       'latent_dim': ('mil', 'latent_dim'),
+       'projection_dim': ('mil', 'projection_dim'),
+       'negative_weight': ('mil', 'loss', 'negative_weight'),
+       'student_optimize_period': ('mil', 'student', 'optimize_period'),
+       'epochs': ('mil', 'training', 'epochs'),
+       'disease_ratio_lambda': ('mil', 'loss', 'disease_ratio_reg', 'lambda_weight'),
+   }
+   ```
+
+3. **Disease Ratio Regularization 지원**
+   - `disease_ratio_lambda > 0`일 때 disease ratio 계산 후 trainer에 전달
+   ```python
+   if disease_ratio_lambda > 0:
+       disease_ratio = calculate_disease_ratio_from_dataloader(
+           instance_dl, model_encoder, device, ...
+       )
+   trainer = MILTrainer(..., disease_ratio=disease_ratio, ratio_reg_lambda=disease_ratio_lambda)
+   ```
+
+4. **사용법**
+   ```bash
+   python scripts/03_finalize_model.py \
+       --config config/skin3.yaml \
+       --best_params results/skin3/tuning_*/best_params.yaml \
+       --gpu 0
+   ```
+
+#### 수정된 파일
+- `scripts/03_finalize_model.py`
+
+---
+
+### 2. 전체 스크립트 데이터 로딩 통일
+
+#### 문제점
+- `03_finalize_model.py`, `04_cross_disease_eval.py`, `05_cell_scoring.py`가 구버전 API 사용
+  - `load_adata()` 대신 `load_adata_with_subset()` 사용해야 함
+  - `config.data.adata_path` 존재하지 않음 → `config.data.whole_adata_path` 사용
+
+#### 해결책
+모든 스크립트를 `02_train_loocv.py`, `06_tune_hyperparams.py`와 동일한 패턴으로 통일:
+
+1. **데이터 로딩**
+   ```python
+   adata = load_adata_with_subset(
+       whole_adata_path=config.data.whole_adata_path,
+       subset_enabled=config.data.subset.enabled,
+       subset_column=config.data.subset.column,
+       subset_values=config.data.subset.values,
+       cache_dir=config.data.subset.cache_dir,
+       use_cache=config.data.subset.use_cache,
+   )
+   ```
+
+2. **Study ID Mapping**
+   - 각 스크립트의 dataloader 생성 함수 내에서 study mapping 적용
+   ```python
+   if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
+       if embedding_mapping_path and Path(embedding_mapping_path).exists():
+           id_to_name = load_study_mapping(embedding_mapping_path)
+           name_to_id = {v: k for k, v in id_to_name.items()}
+           adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
+   ```
+
+3. **Embedding IDs 직접 컬럼 사용**
+   - 기존: `embedding_mapping` dict를 통해 sample_id → study_id 변환
+   - 변경: 직접 `adata.obs[embedding_col]`에서 가져옴
+   ```python
+   if embedding_col in adata.obs.columns:
+       embedding_ids = torch.tensor(
+           adata.obs[embedding_col].values.astype(int),
+           dtype=torch.long, device=device
+       )
+   ```
+
+#### 수정된 파일
+- `scripts/03_finalize_model.py`: `create_full_dataloaders()` 함수 수정
+- `scripts/04_cross_disease_eval.py`: `create_test_dataloader()` 함수 수정, import 변경
+- `scripts/05_cell_scoring.py`: `ensure_embedding_column()` 함수 추가, `compute_cell_scores()` 수정
+
+---
+
+### 3. 문서 업데이트
+
+#### CLAUDE.md
+- 변경 이력에 3차 세션 내용 추가
+- TODO 항목 상태 업데이트 (완료)
+
+---
+
+## 수정된 파일 목록
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `scripts/03_finalize_model.py` | `--best_params` 옵션, disease ratio 지원, 데이터 로딩 통일 |
+| `scripts/04_cross_disease_eval.py` | 데이터 로딩 통일, study mapping 로직 추가 |
+| `scripts/05_cell_scoring.py` | 데이터 로딩 통일, `ensure_embedding_column()` 함수 추가 |
+| `CLAUDE.md` | 변경 이력 추가 |
+| `docs/session_log_20260130.md` | 세션 로그 업데이트 |
+
+---
+
+## 파이프라인 실행 예시 (전체)
+
+```bash
+# 1. Encoder Pretrain (처음 한 번)
+python scripts/01_pretrain_encoder.py --config config/default.yaml --gpu 0
+
+# 1.1 결과물 배치 (수동)
+cp results/pretrain_*/vq_aenb_conditional.pth results/pretrained/vq_aenb_conditional_whole.pth
+cp results/pretrain_*/study_mapping.json results/pretrained/study_mapping.json
+
+# 2. LOOCV Baseline
+python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
+
+# 3. 하이퍼파라미터 튜닝
+python scripts/06_tune_hyperparams.py --config config/skin3.yaml --gpu 0 --verbose
+# → results/skin3/tuning_*/best_params.yaml 생성
+
+# 4. Final Model 학습 (best params 적용)
+python scripts/03_finalize_model.py \
+    --config config/skin3.yaml \
+    --best_params results/skin3/tuning_*/best_params.yaml \
+    --gpu 0
+# → results/skin3/final_model_*/
+
+# 5a. Cell Scoring (학습 데이터)
+python scripts/05_cell_scoring.py \
+    --model_dir results/skin3/final_model_* \
+    --config config/skin3.yaml \
+    --gpu 0
+
+# 5b. Cross-disease 평가
+python scripts/04_cross_disease_eval.py \
+    --model_dir results/skin3/final_model_* \
+    --test_config config/scp1884.yaml \
+    --gpu 0
+```
+
+---
+
+## best_params.yaml 형식
+
+```yaml
+best_hyperparameters:
+  disease_ratio_lambda: 0.05
+  encoder_learning_rate: 0.0001
+  epochs: 30
+  learning_rate: 0.001
+best_score:
+  metric: auc
+  value: 1.0
+timestamp: '2026-01-30T01:33:46.123456'
+```
