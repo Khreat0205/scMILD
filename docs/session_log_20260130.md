@@ -399,3 +399,257 @@ best_score:
   value: 1.0
 timestamp: '2026-01-30T01:33:46.123456'
 ```
+
+---
+
+# Session Log - 2026-01-30 (4차)
+
+## 주요 작업 내용
+
+### 1. Conditional Embedding 일반화 (Study → Organ 지원)
+
+#### 목적
+- 기존에 `study` 컬럼 기준으로 하드코딩되어 있던 부분을 일반화
+- `Organ` 등 다른 categorical 컬럼도 conditional embedding으로 사용 가능하도록 변경
+
+#### 구현 내용
+
+1. **`src/data/preprocessing.py`**
+   - `encode_labels()` 함수 파라미터 변경: `study_col` → `conditional_col`, `conditional_encoded_col`
+   - 새 함수 추가 (일반화된 버전):
+     - `get_conditional_mapping()`
+     - `save_conditional_mapping()`
+     - `load_conditional_mapping()`
+   - Backward compatibility alias 추가:
+     ```python
+     get_study_mapping = get_conditional_mapping
+     save_study_mapping = save_conditional_mapping
+     load_study_mapping = load_conditional_mapping
+     ```
+
+2. **`scripts/01_pretrain_encoder.py`**
+   - Config에서 conditional 설정 읽기:
+     ```python
+     conditional_col = config.data.conditional_embedding.column  # e.g., 'study' or 'Organ'
+     conditional_encoded_col = config.data.conditional_embedding.encoded_column
+     ```
+   - 매핑 파일 이름 동적 생성: `{conditional_col}_mapping.json`
+   - 출력 메시지에서 하드코딩된 "study" 제거
+
+3. **모든 MIL 스크립트 수정**
+   - `02_train_loocv.py`, `03_finalize_model.py`, `04_cross_disease_eval.py`, `05_cell_scoring.py`, `06_tune_hyperparams.py`
+   - `load_study_mapping()` → `load_conditional_mapping()` 변경
+   - 동적 컬럼명 사용 in 출력 메시지
+
+#### 수정된 파일
+- `src/data/preprocessing.py`
+- `src/data/__init__.py`
+- `scripts/01_pretrain_encoder.py`
+- `scripts/02_train_loocv.py`
+- `scripts/03_finalize_model.py`
+- `scripts/04_cross_disease_eval.py`
+- `scripts/05_cell_scoring.py`
+- `scripts/06_tune_hyperparams.py`
+
+---
+
+### 2. Pretrain 스크립트 CLI 하이퍼파라미터 버그 수정
+
+#### 문제점
+- `--num_codes` 등 CLI 옵션의 기본값이 하드코딩되어 있어서 config 값이 무시됨
+- 예: `--num_codes`의 기본값이 1024로 설정되어 있어, config에서 512를 설정해도 1024가 사용됨
+
+#### 해결책
+모든 하이퍼파라미터 CLI 옵션의 기본값을 `None`으로 변경:
+
+```python
+# 변경 전
+parser.add_argument("--num_codes", type=int, default=1024, help="...")
+
+# 변경 후
+parser.add_argument("--num_codes", type=int, default=None, help="...")
+```
+
+Config 우선순위 로직:
+```python
+# CLI 옵션이 명시적으로 주어진 경우 → CLI 값 사용
+# CLI 옵션이 None인 경우 → config 값 사용
+num_codes = args.num_codes if args.num_codes is not None else config.encoder.num_codes
+```
+
+#### 영향받는 파라미터
+- `--latent_dim`
+- `--num_codes`
+- `--study_emb_dim`
+- `--batch_size`
+- `--epochs`
+- `--lr`
+- `--patience`
+
+#### 수정된 파일
+- `scripts/01_pretrain_encoder.py`
+
+---
+
+### 3. Config 시스템 확장 (`src/config.py`)
+
+#### 변경 내용
+`EncoderConfig`에 `study_emb_dim` 필드 추가:
+
+```python
+@dataclass
+class EncoderConfig:
+    """Encoder 설정"""
+    type: str = "VQ_AENB_Conditional"
+    latent_dim: int = 128
+    num_codes: int = 1024
+    study_emb_dim: int = 16  # 새로 추가
+    pretrain: EncoderPretrainConfig = field(default_factory=EncoderPretrainConfig)
+```
+
+`_dict_to_config()` 함수에도 파싱 추가:
+```python
+encoder = EncoderConfig(
+    ...
+    study_emb_dim=encoder_dict.get("study_emb_dim", 16),
+    ...
+)
+```
+
+#### 수정된 파일
+- `src/config.py`
+
+---
+
+### 4. 메모리 관리 개선 (CUDA OOM 방지)
+
+#### 문제점
+- SCP1884 등 대용량 데이터로 LOOCV 수행 시 fold 간 GPU 메모리 누적으로 OOM 발생
+
+#### 해결책
+LOOCV fold 사이에 메모리 정리 로직 추가:
+
+```python
+# 이전 fold의 모델/데이터로더 참조 삭제
+if fold_idx > 0:
+    del model_teacher, model_student, model_encoder
+    del train_bag_dl, train_instance_dl, test_bag_dl
+    gc.collect()
+    torch.cuda.empty_cache()
+```
+
+모든 fold 완료 후 최종 정리:
+```python
+# Final cleanup after all folds
+del model_teacher, model_student, model_encoder
+del train_bag_dl, train_instance_dl, test_bag_dl
+gc.collect()
+torch.cuda.empty_cache()
+```
+
+#### 수정된 파일
+- `scripts/02_train_loocv.py`
+- `scripts/06_tune_hyperparams.py`
+
+---
+
+### 5. 새 Config 파일 추가 (Organ 기반)
+
+#### 추가된 파일
+
+1. **`config/pretrain_epoch100_organ_ver00.yaml`**
+   - Organ 기반 pretrain 설정
+   - `conditional_embedding.column: "Organ"`
+   - `encoder.num_codes: 512` (Study 기반보다 작음 - Organ 종류가 적으므로)
+   - `encoder.pretrain.epochs: 100`
+   - `encoder.pretrain.learning_rate: 0.0001`
+
+2. **`config/skin3_organ_ver00.yaml`**
+   - `_base_: pretrain_epoch100_organ_ver00.yaml` 상속
+   - Skin3 데이터 subset 설정
+
+3. **`config/scp1884_organ_ver00.yaml`**
+   - `_base_: pretrain_epoch100_organ_ver00.yaml` 상속
+   - SCP1884 데이터 subset 설정
+   - Subsampling 설정 (max_cells_per_sample: 5000)
+
+---
+
+## Conditional Embedding 옵션 비교
+
+| 설정 | Study 기반 | Organ 기반 |
+|------|-----------|-----------|
+| `conditional_embedding.column` | `study` | `Organ` |
+| `conditional_embedding.encoded_column` | `study_id_numeric` | `Organ_id_numeric` |
+| `conditional_embedding.mapping_path` | `study_mapping.json` | `organ_mapping.json` |
+| 배치 효과 보정 기준 | 개별 연구(study) | 조직 타입(organ) |
+| 일반적인 `num_codes` | 1024 | 512 |
+
+---
+
+## 수정된 파일 목록
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `src/config.py` | `EncoderConfig.study_emb_dim` 필드 추가 |
+| `src/data/preprocessing.py` | Conditional mapping 일반화, backward compatibility alias |
+| `src/data/__init__.py` | 새 함수 export |
+| `scripts/01_pretrain_encoder.py` | CLI 기본값 None, config 우선순위 로직 |
+| `scripts/02_train_loocv.py` | `load_conditional_mapping`, 메모리 관리 |
+| `scripts/03_finalize_model.py` | `load_conditional_mapping` |
+| `scripts/04_cross_disease_eval.py` | `load_conditional_mapping` |
+| `scripts/05_cell_scoring.py` | `load_conditional_mapping` |
+| `scripts/06_tune_hyperparams.py` | `load_conditional_mapping`, 메모리 관리 |
+| `config/pretrain_epoch100_organ_ver00.yaml` | 새 파일 |
+| `config/skin3_organ_ver00.yaml` | 새 파일 |
+| `config/scp1884_organ_ver00.yaml` | 새 파일 |
+| `CLAUDE.md` | 변경 이력 추가 |
+| `docs/session_log_20260130.md` | 세션 로그 업데이트 |
+
+---
+
+## 파이프라인 실행 예시 (Organ 기반)
+
+```bash
+# 1. Encoder Pretrain (Organ 기반)
+python scripts/01_pretrain_encoder.py --config config/pretrain_epoch100_organ_ver00.yaml --gpu 0
+
+# 1.1 결과물 배치 (수동)
+mkdir -p results/pretrained_organ
+cp results/pretrained_organ/pretrain_*/vq_aenb_conditional.pth results/pretrained_organ/vq_aenb_conditional_organ.pth
+cp results/pretrained_organ/pretrain_*/organ_mapping.json results/pretrained_organ/organ_mapping.json
+
+# 2. LOOCV Baseline (Skin3 + Organ)
+python scripts/02_train_loocv.py --config config/skin3_organ_ver00.yaml --gpu 0
+
+# 3. 하이퍼파라미터 튜닝
+python scripts/06_tune_hyperparams.py --config config/skin3_organ_ver00.yaml --gpu 0 --verbose
+
+# 4. Final Model 학습
+python scripts/03_finalize_model.py \
+    --config config/skin3_organ_ver00.yaml \
+    --best_params results/skin3_organ_ver00/tuning_*/best_params.yaml \
+    --gpu 0
+
+# 5. Cross-disease 평가 (Skin3 → SCP1884)
+python scripts/04_cross_disease_eval.py \
+    --model_dir results/skin3_organ_ver00/final_model_* \
+    --test_config config/scp1884_organ_ver00.yaml \
+    --gpu 0
+```
+
+---
+
+## 주의사항
+
+1. **Pretrain 시 conditional 컬럼 확인**
+   - Config의 `conditional_embedding.column` 설정이 adata에 실제로 존재하는지 확인
+   - Organ 기반 사용 시 데이터에 `Organ` 컬럼이 있어야 함
+
+2. **매핑 파일 경로 일치**
+   - Pretrain 시 생성되는 `{column}_mapping.json`의 경로와
+   - MIL 학습 config의 `conditional_embedding.mapping_path`가 일치해야 함
+
+3. **Backward Compatibility**
+   - 기존 `load_study_mapping()` 함수는 `load_conditional_mapping()`의 alias로 동작
+   - 기존 코드 수정 없이 사용 가능
