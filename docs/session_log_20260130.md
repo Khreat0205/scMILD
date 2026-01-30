@@ -653,3 +653,39 @@ python scripts/04_cross_disease_eval.py \
 3. **Backward Compatibility**
    - 기존 `load_study_mapping()` 함수는 `load_conditional_mapping()`의 alias로 동작
    - 기존 코드 수정 없이 사용 가능
+
+---
+
+# Session Log - 2026-01-30 (5차)
+
+## 주요 작업 내용
+
+### 1. `torch.set_num_threads(16)` 설정 추가
+
+#### 배경
+- Legacy 코드에서는 `torch.set_num_threads(16~32)` 설정이 있었으나, 현재 `scripts/` 스크립트들에는 없음
+- CPU 스레드 수 설정이 GPU utilization 향상에 기여 (CPU 병목 해소 → GPU idle 시간 감소)
+
+#### 구현 내용
+모든 `scripts/*.py` 파일에 `torch.set_num_threads(16)` 추가:
+
+```python
+import torch
+torch.set_num_threads(16)
+```
+
+#### 수정된 파일
+
+| 파일 | 추가된 위치 |
+|------|-----------|
+| `scripts/01_pretrain_encoder.py` | 20행 |
+| `scripts/02_train_loocv.py` | 18행 |
+| `scripts/03_finalize_model.py` | 25행 |
+| `scripts/04_cross_disease_eval.py` | 24행 |
+| `scripts/05_cell_scoring.py` | 23행 |
+| `scripts/06_tune_hyperparams.py` | 32행 |
+
+#### 효과
+- CPU 전처리 (sparse → dense 변환, collate 등) 병렬화 개선
+- GPU utilization 향상 (데이터 공급 병목 해소)
+- Legacy 코드와 동일한 설정 적용
