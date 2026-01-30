@@ -32,6 +32,8 @@ from .preprocessing import (
     subsample_adata,
     encode_labels,
     get_study_mapping,
+    load_study_mapping,
+    save_study_mapping,
 )
 
 __all__ = [
@@ -58,4 +60,6 @@ __all__ = [
     "subsample_adata",
     "encode_labels",
     "get_study_mapping",
+    "load_study_mapping",
+    "save_study_mapping",
 ]
