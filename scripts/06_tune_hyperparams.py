@@ -251,7 +251,7 @@ def run_loocv_for_hyperparams(
     splitter = LOOCVSplitter(random_seed=config.splitting.random_seed)
     n_folds = splitter.get_n_splits(sample_ids)
 
-    all_metrics = []
+    all_results = []
 
     for fold_info in splitter.split(sample_ids, labels, sample_names):
         fold_idx = fold_info.fold_idx
@@ -309,19 +309,34 @@ def run_loocv_for_hyperparams(
             test_sample_name=fold_info.test_sample_name or f"Sample_{fold_idx}"
         )
 
-        all_metrics.append(result.metrics)
+        all_results.append(result)
 
         if verbose:
-            print(f"  Fold {fold_idx + 1}/{n_folds}: AUC={result.metrics['auc']:.4f}")
+            # For LOOCV, show prediction instead of meaningless fold AUC
+            pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
+            true_label = "Disease" if result.y_true[0] == 1 else "Control"
+            correct = "✓" if pred_label == true_label else "✗"
+            print(f"  Fold {fold_idx + 1}/{n_folds}: prob={result.y_pred_proba[0]:.4f} "
+                  f"(pred={pred_label}, true={true_label}) {correct}")
 
-    # Aggregate metrics
-    avg_metrics = {}
-    for key in all_metrics[0].keys():
-        values = [m[key] for m in all_metrics]
-        avg_metrics[f"mean_{key}"] = np.mean(values)
-        avg_metrics[f"std_{key}"] = np.std(values)
+    # For LOOCV: concatenate all predictions and compute overall metrics
+    from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 
-    return avg_metrics
+    all_y_true = np.concatenate([r.y_true for r in all_results])
+    all_y_pred_proba = np.concatenate([r.y_pred_proba for r in all_results])
+    all_y_pred = (all_y_pred_proba >= 0.5).astype(int)
+
+    # Compute overall metrics (this is the correct way for LOOCV)
+    overall_metrics = {
+        'mean_auc': roc_auc_score(all_y_true, all_y_pred_proba),
+        'mean_accuracy': accuracy_score(all_y_true, all_y_pred),
+        'mean_f1_score': f1_score(all_y_true, all_y_pred, zero_division=0),
+        'std_auc': 0.0,  # No std for concatenated metrics
+        'std_accuracy': 0.0,
+        'std_f1_score': 0.0,
+    }
+
+    return overall_metrics
 
 
 def main():

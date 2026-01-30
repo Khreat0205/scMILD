@@ -217,3 +217,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 4. [ ] 모델 구조 변경 시 pretrained encoder와 호환성 확인
 5. [ ] Pretrain 후 `study_mapping.json` 복사 확인
 6. [ ] Subset 데이터 사용 시 `conditional_embedding.mapping_path` 설정 확인
+
+## 변경 이력
+
+### 2026-01-30
+- **study_ids 전달 문제 수정**
+  - Pretrain 시 `study_mapping.json` 자동 생성
+  - MIL 학습 시 매핑 파일 로드하여 `study_id_numeric` 컬럼 생성
+  - `config.data.conditional_embedding.mapping_path` 설정 추가
+
+- **LOOCV AUROC 계산 방식 개선**
+  - fold별 AUC 평균 → 전체 예측 concatenate 후 AUROC 계산
+  - `FoldResult`에 `y_true`, `y_pred_proba` 필드 추가
+  - `overall_results.csv`, `predictions.csv` 출력 추가
+
+- **수정된 파일**
+  - `scripts/01_pretrain_encoder.py`
+  - `scripts/02_train_loocv.py`
+  - `scripts/06_tune_hyperparams.py`
+  - `src/training/trainer.py`
+  - `src/config.py`
+  - `src/data/__init__.py`
+  - `config/default.yaml`
+
+- 세션 로그: `docs/session_log_20260130.md`
