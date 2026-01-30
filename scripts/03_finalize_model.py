@@ -117,12 +117,30 @@ def create_full_dataloaders(
     adata,
     device: torch.device,
     config: ScMILDConfig,
-    embedding_mapping: dict
 ) -> tuple:
     """Create dataloaders using all data (no split)."""
 
     sample_col = config.data.columns.sample_id
     label_col = config.data.columns.disease_label
+    embedding_col = config.data.conditional_embedding.encoded_column
+    embedding_source_col = config.data.conditional_embedding.column  # e.g., "study"
+    embedding_mapping_path = config.data.conditional_embedding.mapping_path
+
+    # If encoded column doesn't exist, create it from source column using pretrain mapping
+    if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
+        if embedding_mapping_path and Path(embedding_mapping_path).exists():
+            # Load pretrain mapping (study_id -> study_name) and invert to (study_name -> study_id)
+            from src.data import load_study_mapping
+            id_to_name = load_study_mapping(embedding_mapping_path)
+            name_to_id = {v: k for k, v in id_to_name.items()}
+            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"  Mapping: {name_to_id}")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
+        else:
+            # Fallback: create from category codes (WARNING: may not match pretrain)
+            print(f"WARNING: Creating '{embedding_col}' from '{embedding_source_col}' without pretrain mapping!")
+            print(f"  This may cause inconsistency with pretrained encoder.")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].astype('category').cat.codes
 
     # Extract data
     if hasattr(adata.X, 'toarray'):
@@ -148,11 +166,11 @@ def create_full_dataloaders(
         adata.obs[label_col].values, dtype=torch.long, device=device
     )
 
-    # Embedding IDs
+    # Embedding IDs (study or organ) - use direct column value
     embedding_ids = None
-    if embedding_mapping:
+    if embedding_col in adata.obs.columns:
         embedding_ids = torch.tensor(
-            [embedding_mapping.get(int(s), 0) for s in adata.obs[sample_col].values],
+            adata.obs[embedding_col].values.astype(int),
             dtype=torch.long, device=device
         )
 
@@ -284,22 +302,9 @@ def main():
     n_samples = adata.obs[config.data.columns.sample_id].nunique()
     print(f"Number of samples: {n_samples}")
 
-    # Load embedding mapping
-    embedding_col = config.data.conditional_embedding.encoded_column
-    embedding_mapping = {}
-    if embedding_col in adata.obs.columns:
-        mapping_df = adata.obs[[config.data.columns.sample_id, embedding_col]].drop_duplicates()
-        embedding_mapping = dict(zip(
-            mapping_df[config.data.columns.sample_id].astype(int),
-            mapping_df[embedding_col].astype(int)
-        ))
-        print(f"Using conditional embedding: {config.data.conditional_embedding.column}")
-
-    # Create dataloaders
+    # Create dataloaders (study_id mapping is handled inside)
     print("\nCreating dataloaders...")
-    bag_dl, instance_dl = create_full_dataloaders(
-        adata, device, config, embedding_mapping
-    )
+    bag_dl, instance_dl = create_full_dataloaders(adata, device, config)
 
     # Create models
     print("Creating models...")
