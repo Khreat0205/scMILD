@@ -29,7 +29,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config, ScMILDConfig
-from src.data import load_adata, MilDataset, collate_mil
+from src.data import load_adata_with_subset, print_adata_summary, load_study_mapping, MilDataset, collate_mil
 from src.models import (
     GatedAttentionModule, TeacherBranch, StudentBranch,
     VQEncoderWrapperConditional
@@ -102,6 +102,25 @@ def load_trained_models(model_dir: str, device: torch.device, config: ScMILDConf
     return model_teacher, model_student, model_encoder
 
 
+def ensure_embedding_column(adata, config: ScMILDConfig):
+    """Ensure embedding column exists in adata.obs."""
+    embedding_col = config.data.conditional_embedding.encoded_column
+    embedding_source_col = config.data.conditional_embedding.column
+    embedding_mapping_path = config.data.conditional_embedding.mapping_path
+
+    if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
+        if embedding_mapping_path and Path(embedding_mapping_path).exists():
+            id_to_name = load_study_mapping(embedding_mapping_path)
+            name_to_id = {v: k for k, v in id_to_name.items()}
+            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"  Mapping: {name_to_id}")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
+        else:
+            print(f"WARNING: Creating '{embedding_col}' from '{embedding_source_col}' without pretrain mapping!")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].astype('category').cat.codes
+    return adata
+
+
 @torch.no_grad()
 def compute_cell_scores(
     adata,
@@ -110,7 +129,6 @@ def compute_cell_scores(
     model_encoder,
     device: torch.device,
     config: ScMILDConfig,
-    embedding_mapping: dict,
     batch_size: int = 10000
 ):
     """
@@ -151,10 +169,10 @@ def compute_cell_scores(
 
         sample_ids = batch_adata.obs[sample_col].values
 
-        # Get embedding IDs
-        if embedding_mapping:
+        # Get embedding IDs from column directly
+        if embedding_col in batch_adata.obs.columns:
             embedding_ids = torch.tensor(
-                [embedding_mapping.get(int(s), 0) for s in sample_ids],
+                batch_adata.obs[embedding_col].values.astype(int),
                 dtype=torch.long, device=device
             )
         else:
@@ -235,21 +253,20 @@ def main():
         output_dir = model_dir / f"cell_scores_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load data
-    print(f"\nLoading data from {config.data.adata_path}")
-    adata = load_adata(config.data.adata_path)
-    print(f"Data: {adata.n_obs} cells × {adata.n_vars} genes")
+    # Load data (with optional subset)
+    print(f"\nLoading data...")
+    adata = load_adata_with_subset(
+        whole_adata_path=config.data.whole_adata_path,
+        subset_enabled=config.data.subset.enabled,
+        subset_column=config.data.subset.column,
+        subset_values=config.data.subset.values,
+        cache_dir=config.data.subset.cache_dir,
+        use_cache=config.data.subset.use_cache,
+    )
+    print_adata_summary(adata, "Loaded Data")
 
-    # Load embedding mapping
-    embedding_col = config.data.conditional_embedding.encoded_column
-    embedding_mapping = {}
-    if embedding_col in adata.obs.columns:
-        mapping_df = adata.obs[[config.data.columns.sample_id, embedding_col]].drop_duplicates()
-        embedding_mapping = dict(zip(
-            mapping_df[config.data.columns.sample_id].astype(int),
-            mapping_df[embedding_col].astype(int)
-        ))
-        print(f"Using embedding column: {config.data.conditional_embedding.column}")
+    # Ensure embedding column exists (apply study mapping if needed)
+    adata = ensure_embedding_column(adata, config)
 
     # Load models
     print("\nLoading trained models...")
@@ -266,7 +283,6 @@ def main():
         model_encoder,
         device,
         config,
-        embedding_mapping,
         batch_size=args.batch_size
     )
 

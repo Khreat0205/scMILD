@@ -30,7 +30,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config, ScMILDConfig
-from src.data import load_adata, MilDataset, collate_mil
+from src.data import load_adata_with_subset, print_adata_summary, load_study_mapping, MilDataset, collate_mil
 from src.models import (
     GatedAttentionModule, TeacherBranch, StudentBranch,
     VQEncoderWrapperConditional
@@ -108,12 +108,26 @@ def create_test_dataloader(
     adata,
     device: torch.device,
     config: ScMILDConfig,
-    embedding_mapping: dict
 ) -> DataLoader:
     """Create test dataloader."""
 
     sample_col = config.data.columns.sample_id
     label_col = config.data.columns.disease_label
+    embedding_col = config.data.conditional_embedding.encoded_column
+    embedding_source_col = config.data.conditional_embedding.column
+    embedding_mapping_path = config.data.conditional_embedding.mapping_path
+
+    # If encoded column doesn't exist, create it from source column using pretrain mapping
+    if embedding_col not in adata.obs.columns and embedding_source_col in adata.obs.columns:
+        if embedding_mapping_path and Path(embedding_mapping_path).exists():
+            id_to_name = load_study_mapping(embedding_mapping_path)
+            name_to_id = {v: k for k, v in id_to_name.items()}
+            print(f"Using pretrain study mapping from: {embedding_mapping_path}")
+            print(f"  Mapping: {name_to_id}")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].map(name_to_id)
+        else:
+            print(f"WARNING: Creating '{embedding_col}' from '{embedding_source_col}' without pretrain mapping!")
+            adata.obs[embedding_col] = adata.obs[embedding_source_col].astype('category').cat.codes
 
     # Extract data
     if hasattr(adata.X, 'toarray'):
@@ -139,11 +153,11 @@ def create_test_dataloader(
         adata.obs[label_col].values, dtype=torch.long, device=device
     )
 
-    # Embedding IDs
+    # Embedding IDs (study or organ) - use direct column value
     embedding_ids = None
-    if embedding_mapping:
+    if embedding_col in adata.obs.columns:
         embedding_ids = torch.tensor(
-            [embedding_mapping.get(int(s), 0) for s in adata.obs[sample_col].values],
+            adata.obs[embedding_col].values.astype(int),
             dtype=torch.long, device=device
         )
 
@@ -241,29 +255,23 @@ def main():
         output_dir = model_dir / f"cross_eval_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load test data
-    print(f"\nLoading test data from {test_config.data.adata_path}")
-    test_adata = load_adata(test_config.data.adata_path)
-    print(f"Test data: {test_adata.n_obs} cells × {test_adata.n_vars} genes")
+    # Load test data (with optional subset)
+    print(f"\nLoading test data...")
+    test_adata = load_adata_with_subset(
+        whole_adata_path=test_config.data.whole_adata_path,
+        subset_enabled=test_config.data.subset.enabled,
+        subset_column=test_config.data.subset.column,
+        subset_values=test_config.data.subset.values,
+        cache_dir=test_config.data.subset.cache_dir,
+        use_cache=test_config.data.subset.use_cache,
+    )
+    print_adata_summary(test_adata, "Test Data")
 
     n_test_samples = test_adata.obs[test_config.data.columns.sample_id].nunique()
     print(f"Number of test samples: {n_test_samples}")
 
-    # Load embedding mapping
-    embedding_col = test_config.data.conditional_embedding.encoded_column
-    embedding_mapping = {}
-    if embedding_col in test_adata.obs.columns:
-        mapping_df = test_adata.obs[[test_config.data.columns.sample_id, embedding_col]].drop_duplicates()
-        embedding_mapping = dict(zip(
-            mapping_df[test_config.data.columns.sample_id].astype(int),
-            mapping_df[embedding_col].astype(int)
-        ))
-        print(f"Using embedding column: {test_config.data.conditional_embedding.column}")
-
-    # Create test dataloader
-    test_dl = create_test_dataloader(
-        test_adata, device, test_config, embedding_mapping
-    )
+    # Create test dataloader (study_id mapping is handled inside)
+    test_dl = create_test_dataloader(test_adata, device, test_config)
 
     # Load models
     print("\nLoading trained models...")
