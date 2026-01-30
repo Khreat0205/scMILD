@@ -192,6 +192,8 @@ class TuningConfig:
     metric: str = "auc"  # 최적화 기준 메트릭
     # Output
     results_file: str = "tuning_results.csv"
+    # Model saving
+    save_top_k: int = 3  # Top K 조합의 모델 저장 (0이면 저장 안함)
 
 
 @dataclass

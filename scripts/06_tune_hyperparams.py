@@ -4,6 +4,11 @@
 
 LOOCV 기반 Grid Search를 수행하여 최적의 하이퍼파라미터 조합을 찾습니다.
 
+Features:
+    - 실시간 CSV 저장: 각 조합 완료 시마다 tuning_results.csv 업데이트
+    - Top-K 모델 저장: 상위 K개 조합의 fold별 모델 저장
+    - best_params.yaml: 최적 하이퍼파라미터 별도 저장
+
 Usage:
     python scripts/06_tune_hyperparams.py --config config/skin3.yaml
     python scripts/06_tune_hyperparams.py --config config/scp1884.yaml --gpu 0
@@ -16,6 +21,7 @@ from pathlib import Path
 from datetime import datetime
 from itertools import product
 import copy
+import heapq
 
 # Add project root to path BEFORE other imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -24,6 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import torch
 import numpy as np
 import pandas as pd
+import yaml
 from torch.utils.data import DataLoader
 
 from src.config import load_config, ScMILDConfig
@@ -230,10 +237,18 @@ def run_loocv_for_hyperparams(
     encoder_learning_rate: float,
     epochs: int,
     disease_ratio_lambda: float,
-    verbose: bool = False
+    verbose: bool = False,
+    return_models: bool = False
 ) -> dict:
     """
     주어진 하이퍼파라미터로 전체 LOOCV를 수행하고 평균 메트릭 반환.
+
+    Args:
+        return_models: True이면 fold별 모델들도 반환
+
+    Returns:
+        metrics dict, 또는 return_models=True이면 (metrics, fold_models) 튜플
+        fold_models: list of dict with keys 'teacher', 'student', 'encoder'
     """
     sample_col = config.data.columns.sample_id
     label_col = config.data.columns.disease_label
@@ -252,6 +267,7 @@ def run_loocv_for_hyperparams(
     n_folds = splitter.get_n_splits(sample_ids)
 
     all_results = []
+    fold_models = [] if return_models else None
 
     for fold_info in splitter.split(sample_ids, labels, sample_names):
         fold_idx = fold_info.fold_idx
@@ -312,6 +328,16 @@ def run_loocv_for_hyperparams(
 
         all_results.append(result)
 
+        # Save models if requested
+        if return_models:
+            fold_models.append({
+                'teacher': copy.deepcopy(model_teacher.state_dict()),
+                'student': copy.deepcopy(model_student.state_dict()),
+                'encoder': copy.deepcopy(model_encoder.state_dict()),
+                'fold_idx': fold_idx,
+                'test_sample': fold_info.test_sample_name or f"Sample_{fold_idx}",
+            })
+
         if verbose:
             # For LOOCV, show prediction instead of meaningless fold AUC
             pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
@@ -337,7 +363,103 @@ def run_loocv_for_hyperparams(
         'std_f1_score': 0.0,
     }
 
+    if return_models:
+        return overall_metrics, fold_models
     return overall_metrics
+
+
+class TopKTracker:
+    """Top-K 조합을 추적하고 모델 저장을 관리하는 클래스"""
+
+    def __init__(self, k: int, output_dir: Path, metric_key: str = "mean_auc"):
+        self.k = k
+        self.output_dir = output_dir
+        self.metric_key = metric_key
+        self.models_dir = output_dir / "models"
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+
+        # Min-heap for top-K tracking (score, config_id, params)
+        self.top_k_heap = []
+        self.saved_configs = {}  # config_id -> (params, score)
+
+    def update(self, config_id: int, params: dict, score: float, fold_models: list):
+        """새 결과로 Top-K 업데이트. 필요시 모델 저장/삭제."""
+        if self.k <= 0:
+            return
+
+        if len(self.top_k_heap) < self.k:
+            # 아직 K개 미만: 무조건 추가
+            heapq.heappush(self.top_k_heap, (score, config_id))
+            self._save_models(config_id, params, fold_models)
+            self.saved_configs[config_id] = (params, score)
+        elif score > self.top_k_heap[0][0]:
+            # 현재 최소보다 높음: 최소 제거하고 새로 추가
+            _, removed_id = heapq.heapreplace(self.top_k_heap, (score, config_id))
+            self._delete_models(removed_id)
+            del self.saved_configs[removed_id]
+
+            self._save_models(config_id, params, fold_models)
+            self.saved_configs[config_id] = (params, score)
+
+    def _save_models(self, config_id: int, params: dict, fold_models: list):
+        """fold별 모델 저장"""
+        config_dir = self.models_dir / f"config_{config_id:03d}"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        # params.yaml 저장
+        with open(config_dir / "params.yaml", "w") as f:
+            yaml.dump(params, f, default_flow_style=False)
+
+        # 각 fold 모델 저장
+        for fold_data in fold_models:
+            fold_idx = fold_data['fold_idx']
+            fold_dir = config_dir / f"fold_{fold_idx:02d}"
+            fold_dir.mkdir(parents=True, exist_ok=True)
+
+            torch.save(fold_data['teacher'], fold_dir / "teacher.pth")
+            torch.save(fold_data['student'], fold_dir / "student.pth")
+            torch.save(fold_data['encoder'], fold_dir / "encoder.pth")
+
+            # fold 메타 정보
+            with open(fold_dir / "info.yaml", "w") as f:
+                yaml.dump({
+                    'fold_idx': fold_idx,
+                    'test_sample': fold_data['test_sample']
+                }, f)
+
+    def _delete_models(self, config_id: int):
+        """모델 디렉토리 삭제"""
+        import shutil
+        config_dir = self.models_dir / f"config_{config_id:03d}"
+        if config_dir.exists():
+            shutil.rmtree(config_dir)
+
+    def get_top_k_configs(self) -> list:
+        """Top-K 설정 반환 (점수 내림차순)"""
+        return sorted(
+            [(cid, params, score) for cid, (params, score) in self.saved_configs.items()],
+            key=lambda x: -x[2]
+        )
+
+
+def save_results_csv(results: list, output_path: Path):
+    """결과를 CSV로 저장 (실시간 업데이트용)"""
+    results_df = pd.DataFrame(results)
+    results_df.to_csv(output_path, index=False)
+
+
+def save_best_params(best_params: dict, best_score: float, metric: str, output_path: Path):
+    """최적 하이퍼파라미터를 YAML로 저장"""
+    best_config = {
+        'best_hyperparameters': best_params,
+        'best_score': {
+            'metric': metric,
+            'value': float(best_score)
+        },
+        'timestamp': datetime.now().isoformat()
+    }
+    with open(output_path, "w") as f:
+        yaml.dump(best_config, f, default_flow_style=False)
 
 
 def main():
@@ -392,6 +514,7 @@ def main():
     enc_lr_values = tuning.encoder_learning_rate
     epoch_values = tuning.epochs
     ratio_lambda_values = tuning.disease_ratio_lambda
+    save_top_k = tuning.save_top_k
 
     # Generate all combinations
     param_grid = list(product(lr_values, enc_lr_values, epoch_values, ratio_lambda_values))
@@ -407,18 +530,39 @@ def main():
     print(f"  - disease_ratio_lambda: {ratio_lambda_values}")
     print(f"Total combinations: {n_combinations}")
     print(f"Evaluation metric: {tuning.metric}")
+    print(f"Save top-K models: {save_top_k}")
     print(f"{'='*60}\n")
 
-    # Run grid search
+    # Initialize tracking
     results = []
+    results_path = output_dir / tuning.results_file
+    best_params_path = output_dir / "best_params.yaml"
+    metric_key = f"mean_{tuning.metric}"
+
+    # Top-K tracker for model saving
+    top_k_tracker = TopKTracker(
+        k=save_top_k,
+        output_dir=output_dir,
+        metric_key=metric_key
+    )
+
     best_score = -float('inf')
     best_params = None
 
     for i, (lr, enc_lr, epochs, ratio_lambda) in enumerate(param_grid):
         print(f"\n[{i+1}/{n_combinations}] Testing: lr={lr}, enc_lr={enc_lr}, epochs={epochs}, ratio_lambda={ratio_lambda}")
 
+        params = {
+            'learning_rate': lr,
+            'encoder_learning_rate': enc_lr,
+            'epochs': epochs,
+            'disease_ratio_lambda': ratio_lambda
+        }
+
         try:
-            metrics = run_loocv_for_hyperparams(
+            # return_models=True if we need to save models
+            need_models = save_top_k > 0
+            result_data = run_loocv_for_hyperparams(
                 adata=adata,
                 config=config,
                 device=device,
@@ -427,21 +571,25 @@ def main():
                 encoder_learning_rate=enc_lr,
                 epochs=epochs,
                 disease_ratio_lambda=ratio_lambda,
-                verbose=args.verbose
+                verbose=args.verbose,
+                return_models=need_models
             )
+
+            if need_models:
+                metrics, fold_models = result_data
+            else:
+                metrics = result_data
+                fold_models = None
 
             # Store result
             result = {
-                'learning_rate': lr,
-                'encoder_learning_rate': enc_lr,
-                'epochs': epochs,
-                'disease_ratio_lambda': ratio_lambda,
+                'config_id': i,
+                **params,
                 **metrics
             }
             results.append(result)
 
             # Check if best
-            metric_key = f"mean_{tuning.metric}"
             score = metrics.get(metric_key, 0)
             std_key = f"std_{tuning.metric}"
             std = metrics.get(std_key, 0)
@@ -450,20 +598,29 @@ def main():
 
             if score > best_score:
                 best_score = score
-                best_params = (lr, enc_lr, epochs, ratio_lambda)
+                best_params = params.copy()
                 print(f"  *** New best! ***")
+
+            # Update Top-K tracker
+            if fold_models is not None:
+                top_k_tracker.update(i, params, score, fold_models)
+
+            # Save results CSV after each combination (실시간 저장)
+            save_results_csv(results, results_path)
+            print(f"  (Results saved to {results_path})")
 
         except Exception as e:
             import traceback
             print(f"  Error: {e}")
             traceback.print_exc()
+            # 에러 발생해도 지금까지의 결과는 저장
+            save_results_csv(results, results_path)
             continue
 
-    # Save results
-    results_df = pd.DataFrame(results)
-    results_path = output_dir / tuning.results_file
-    results_df.to_csv(results_path, index=False)
-    print(f"\nResults saved to: {results_path}")
+    # Save best params
+    if best_params:
+        save_best_params(best_params, best_score, tuning.metric, best_params_path)
+        print(f"\nBest params saved to: {best_params_path}")
 
     # Print summary
     print(f"\n{'='*60}")
@@ -471,24 +628,35 @@ def main():
     print(f"{'='*60}")
 
     if best_params:
-        lr, enc_lr, epochs, ratio_lambda = best_params
         print(f"\nBest hyperparameters (by mean {tuning.metric}):")
-        print(f"  - learning_rate: {lr}")
-        print(f"  - encoder_learning_rate: {enc_lr}")
-        print(f"  - epochs: {epochs}")
-        print(f"  - disease_ratio_lambda: {ratio_lambda}")
+        for k, v in best_params.items():
+            print(f"  - {k}: {v}")
         print(f"  - Best {tuning.metric}: {best_score:.4f}")
 
     # Top 5 configurations
     if len(results) > 0:
-        results_df_sorted = results_df.sort_values(f"mean_{tuning.metric}", ascending=False)
+        results_df = pd.DataFrame(results)
+        results_df_sorted = results_df.sort_values(metric_key, ascending=False)
         print(f"\nTop 5 configurations:")
-        for idx, row in results_df_sorted.head(5).iterrows():
-            print(f"  {idx+1}. lr={row['learning_rate']}, enc_lr={row['encoder_learning_rate']}, "
+        for rank, (_, row) in enumerate(results_df_sorted.head(5).iterrows(), 1):
+            print(f"  {rank}. lr={row['learning_rate']}, enc_lr={row['encoder_learning_rate']}, "
                   f"epochs={int(row['epochs'])}, ratio_lambda={row['disease_ratio_lambda']} "
-                  f"-> {tuning.metric}={row[f'mean_{tuning.metric}']:.4f}")
+                  f"-> {tuning.metric}={row[metric_key]:.4f}")
+
+    # Top-K saved models info
+    if save_top_k > 0:
+        print(f"\nSaved Top-{save_top_k} model configurations:")
+        for config_id, params, score in top_k_tracker.get_top_k_configs():
+            print(f"  - config_{config_id:03d}: {tuning.metric}={score:.4f}")
+        print(f"  Models saved in: {top_k_tracker.models_dir}")
 
     print(f"\n{'='*60}")
+    print(f"Output files:")
+    print(f"  - {results_path}")
+    print(f"  - {best_params_path}")
+    if save_top_k > 0:
+        print(f"  - {top_k_tracker.models_dir}/")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":
