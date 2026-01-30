@@ -183,9 +183,10 @@ tuning:
   enabled: false
   learning_rate: [0.001, 0.0001]
   encoder_learning_rate: [0.001, 0.0001]
-  epochs: [100, 50]
+  epochs: [10, 30]  # Transfer learning이므로 작은 epoch 권장
   disease_ratio_lambda: [0.0, 0.05, 0.1]
   metric: "auc"
+  save_top_k: 3  # 상위 K개 조합 모델 저장
 ```
 
 ## 출력 결과 및 모델 관리
@@ -207,7 +208,10 @@ scMILDQ_Cond/results/
 │   │   ├── predictions.csv            # 샘플별 예측 확률
 │   │   └── models/
 │   └── tuning_20260129_HHMMSS/        # 튜닝 결과
-│       └── tuning_results.csv
+│       ├── tuning_results.csv         # 실시간 업데이트
+│       ├── best_params.yaml           # 최적 하이퍼파라미터
+│       └── models/                    # Top-K 모델 저장
+│           └── config_XXX/
 └── scp1884/
     └── ...
 ```

@@ -115,7 +115,7 @@ mil:
   # Student branch 설정
   student:
     enabled: true
-    optimize_period: 3  # 매 N epoch마다 student 최적화
+    optimize_period: 1  # 매 N epoch마다 student 최적화 (default: 1)
 
   # 손실 함수 가중치
   loss:
@@ -179,9 +179,10 @@ tuning:
   enabled: false
 
   # Search space (Grid Search)
+  # Transfer learning 개념이므로 작은 epoch 사용 권장
   learning_rate: [0.001, 0.0001]
   encoder_learning_rate: [0.001, 0.0001]
-  epochs: [100, 50]
+  epochs: [10, 30]  # Pretrained encoder 기반이므로 작은 epoch
   disease_ratio_lambda: [0.0, 0.05, 0.1]
 
   # 최적화 기준 메트릭: "auc" | "accuracy" | "f1_score"
@@ -189,6 +190,9 @@ tuning:
 
   # 결과 파일명
   results_file: "tuning_results.csv"
+
+  # Top-K 모델 저장 (0이면 저장 안함)
+  save_top_k: 3
 
 # ============================================================================
 # TODO (향후 구현 예정)

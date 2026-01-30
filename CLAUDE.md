@@ -236,6 +236,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
   - LOOCV에서 불필요한 `_evaluate()`, `compute_metrics()` 호출 건너뜀
   - sklearn 경고 제거 및 성능 개선
 
+- **하이퍼파라미터 튜닝 개선** (`06_tune_hyperparams.py`)
+  - 실시간 CSV 저장: 각 조합 완료 시마다 `tuning_results.csv` 업데이트
+  - Top-K 모델 저장: `config.tuning.save_top_k` 설정 (기본값: 3)
+  - `best_params.yaml`: 최적 하이퍼파라미터 별도 저장
+  - 튜닝 중 크래시 발생해도 결과 보존
+
+- **기본값 수정**
+  - `student.optimize_period`: 3 → 1 (매 epoch마다 student 최적화)
+  - `tuning.epochs`: [100, 50] → [10, 30] (Transfer learning이므로 작은 epoch)
+
 - **수정된 파일**
   - `scripts/01_pretrain_encoder.py`
   - `scripts/02_train_loocv.py`

@@ -85,6 +85,57 @@
 
 ---
 
+### 4. 하이퍼파라미터 튜닝 개선 (`06_tune_hyperparams.py`)
+
+#### 문제점
+- 튜닝 중 크래시 시 모든 결과 손실 (중간 저장 없음)
+- 모델 저장 없음 - 최적 하이퍼파라미터를 찾아도 다시 학습해야 함
+- best_params가 터미널에만 출력됨
+
+#### 해결책
+1. **실시간 CSV 저장**: 각 조합 완료 시마다 `tuning_results.csv` 업데이트
+2. **Top-K 모델 저장**: 상위 K개 조합의 fold별 모델 저장 (Min-heap 사용)
+3. **best_params.yaml**: 최적 하이퍼파라미터 별도 파일 저장
+
+#### 출력 구조
+```
+tuning_{timestamp}/
+├── tuning_results.csv      # 실시간 업데이트 (각 조합 완료마다)
+├── best_params.yaml        # 최적 하이퍼파라미터
+└── models/                 # Top-K 조합의 모델들
+    ├── config_005/
+    │   ├── params.yaml
+    │   ├── fold_00/
+    │   │   ├── teacher.pth
+    │   │   ├── student.pth
+    │   │   ├── encoder.pth
+    │   │   └── info.yaml
+    │   └── fold_01/
+    ...
+```
+
+#### 수정된 파일
+- `scripts/06_tune_hyperparams.py`: TopKTracker 클래스, 실시간 저장 로직 추가
+- `src/config.py`: `TuningConfig.save_top_k` 필드 추가
+
+---
+
+### 5. 기본값 수정
+
+#### Student optimize_period
+- **변경 전**: `optimize_period: 3`
+- **변경 후**: `optimize_period: 1` (매 epoch마다 student 최적화)
+
+#### 튜닝 epochs
+- **변경 전**: `epochs: [100, 50]`
+- **변경 후**: `epochs: [10, 30]` (Transfer learning이므로 작은 epoch)
+
+#### 수정된 파일
+- `config/default.yaml`
+- `src/config.py`
+
+---
+
 ## 실행 흐름 (수정 후)
 
 ```bash
@@ -135,7 +186,13 @@ results/
     │   ├── predictions.csv             # 샘플별 예측 확률 (NEW)
     │   └── models/
     └── tuning_YYYYMMDD_HHMMSS/
-        └── tuning_results.csv
+        ├── tuning_results.csv          # 실시간 업데이트
+        ├── best_params.yaml            # 최적 하이퍼파라미터 (NEW)
+        └── models/                     # Top-K 모델 (NEW)
+            ├── config_XXX/
+            │   ├── params.yaml
+            │   └── fold_XX/
+            ...
 ```
 
 ---
@@ -153,3 +210,8 @@ results/
    - fold별 AUC는 의미 없음 (테스트 샘플 1개)
    - `overall_results.csv`의 전체 AUROC 사용
    - `skip_fold_metrics=True`로 불필요한 계산 건너뜀
+
+4. **하이퍼파라미터 튜닝 시**
+   - Transfer learning이므로 작은 epoch 사용 (10, 30 권장)
+   - `save_top_k` 설정으로 상위 K개 조합 모델 저장
+   - 중간에 크래시 발생해도 `tuning_results.csv`에 결과 보존

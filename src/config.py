@@ -112,7 +112,7 @@ class MILTrainingConfig:
 class StudentConfig:
     """Student branch 설정"""
     enabled: bool = True
-    optimize_period: int = 3
+    optimize_period: int = 1  # 매 N epoch마다 student 최적화 (default: 1)
 
 
 @dataclass
@@ -186,7 +186,7 @@ class TuningConfig:
     # Search space
     learning_rate: List[float] = field(default_factory=lambda: [0.0001])
     encoder_learning_rate: List[float] = field(default_factory=lambda: [0.0005])
-    epochs: List[int] = field(default_factory=lambda: [100])
+    epochs: List[int] = field(default_factory=lambda: [10, 30])  # Transfer learning이므로 작은 epoch
     disease_ratio_lambda: List[float] = field(default_factory=lambda: [0.0])
     # Evaluation
     metric: str = "auc"  # 최적화 기준 메트릭
