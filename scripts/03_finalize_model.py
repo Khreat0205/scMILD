@@ -31,7 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config, ScMILDConfig
 from src.data import (
-    load_adata,
+    load_adata_with_subset, print_adata_summary,
     MilDataset, InstanceDataset, collate_mil, create_instance_dataset_with_bag_labels
 )
 from src.models import (
@@ -269,10 +269,17 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
 
-    # Load data
-    print(f"\nLoading data from {config.data.adata_path}")
-    adata = load_adata(config.data.adata_path)
-    print(f"Data shape: {adata.n_obs} cells × {adata.n_vars} genes")
+    # Load data (with optional subset)
+    print(f"\nLoading data...")
+    adata = load_adata_with_subset(
+        whole_adata_path=config.data.whole_adata_path,
+        subset_enabled=config.data.subset.enabled,
+        subset_column=config.data.subset.column,
+        subset_values=config.data.subset.values,
+        cache_dir=config.data.subset.cache_dir,
+        study_mapping_path=config.data.conditional_embedding.mapping_path,
+    )
+    print_adata_summary(adata, "Loaded Data")
 
     n_samples = adata.obs[config.data.columns.sample_id].nunique()
     print(f"Number of samples: {n_samples}")
