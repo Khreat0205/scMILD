@@ -39,12 +39,16 @@ scMILD/
 │       └── disease_ratio.py  # Disease Ratio Regularization
 │
 ├── scripts/                  # 실행 스크립트
-│   ├── 01_pretrain_encoder.py    # Encoder pretrain
-│   ├── 02_train_loocv.py         # LOOCV 학습
-│   ├── 03_evaluate.py            # 모델 평가
-│   ├── 04_analyze_attention.py   # Attention 분석
-│   ├── 05_cross_disease.py       # Cross-disease 평가
+│   ├── 01_pretrain_encoder.py    # Encoder pretrain (전체 데이터)
+│   ├── 02_train_loocv.py         # LOOCV 학습 (기본 파라미터)
+│   ├── 03_finalize_model.py      # Final model 학습 (best params)
+│   ├── 04_cross_disease_eval.py  # Cross-disease 평가
+│   ├── 05_cell_scoring.py        # Cell-level scoring
 │   └── 06_tune_hyperparams.py    # Grid Search 튜닝
+│
+├── notebooks/                # 분석 노트북
+│   ├── 01_vq_embedding_analysis.ipynb   # VQ code/embedding 추출
+│   └── 02_codebook_visualization.ipynb  # Codebook 시각화 및 클러스터링
 │
 ├── CLAUDE.md                 # Claude AI 컨텍스트
 ├── legacy/                   # 기존 코드 (참조용)
@@ -87,6 +91,36 @@ adata.obs      # 세포 메타데이터:
 | Skin3 | HS (Hidradenitis Suppurativa) | GSE175990, GSE220116 | 19 | ~36k |
 | SCP1884 | CD (Crohn's Disease) | SCP1884 | 34 | ~290k |
 
+## 파이프라인 개요
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         전체 파이프라인 흐름                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. Pretrain Encoder (전체 데이터, unsupervised)                         │
+│         ↓                                                               │
+│  2. LOOCV 학습 (기본 파라미터로 baseline 확인)                            │
+│         ↓                                                               │
+│  3. 하이퍼파라미터 튜닝 (LOOCV 기반 grid search)                          │
+│         ↓ best_params.yaml                                              │
+│  4. Finalize Model (best params로 전체 subset 학습)                      │
+│         ↓ final_model                                                   │
+│  ┌──────┴──────┐                                                        │
+│  ↓             ↓                                                        │
+│  5a. Cell Scoring     5b. Cross-disease 평가                            │
+│  (학습 데이터)         (다른 질병 데이터)                                  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cell Scoring 주의사항
+
+| 데이터 유형 | 사용 모델 | 이유 |
+|-------------|----------|------|
+| **학습 데이터** (예: Skin3) | LOOCV fold 모델들 | 각 샘플은 해당 샘플 제외 모델로 scoring (data leakage 방지) |
+| **평가 데이터** (예: SCP1884) | Final model | 학습에 포함되지 않았으므로 final model 사용 |
+
 ## 사용법
 
 ### Quick Start
@@ -116,7 +150,7 @@ cp results/pretrain_YYYYMMDD_HHMMSS/study_mapping.json \
    results/pretrained/study_mapping.json
 ```
 
-#### 2. LOOCV 학습
+#### 2. LOOCV 학습 (Baseline)
 
 ```bash
 # Skin3 (HS 분류)
@@ -126,18 +160,49 @@ python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
 python scripts/02_train_loocv.py --config config/scp1884.yaml --gpu 0
 ```
 
-#### 3. 하이퍼파라미터 튜닝 (선택)
+#### 3. 하이퍼파라미터 튜닝
 
 ```bash
 python scripts/06_tune_hyperparams.py --config config/skin3.yaml --gpu 0 --verbose
 ```
 
-#### 4. Cross-disease 평가
+출력: `results/skin3/tuning_YYYYMMDD_HHMMSS/best_params.yaml`
+
+#### 4. Final Model 학습
 
 ```bash
-python scripts/05_cross_disease.py \
-    --source_config config/skin3.yaml \
-    --target_config config/scp1884.yaml \
+# best_params.yaml을 사용하여 전체 데이터로 학습
+python scripts/03_finalize_model.py \
+    --config config/skin3.yaml \
+    --best_params results/skin3/tuning_YYYYMMDD_HHMMSS/best_params.yaml \
+    --gpu 0
+```
+
+출력: `results/skin3/final_model_YYYYMMDD_HHMMSS/`
+
+#### 5. Cell Scoring
+
+```bash
+# 학습 데이터 (Skin3) - LOOCV 모델 사용
+python scripts/05_cell_scoring.py \
+    --loocv_dir results/skin3/loocv_YYYYMMDD_HHMMSS \
+    --config config/skin3.yaml \
+    --gpu 0
+
+# 평가 데이터 (SCP1884) - Final model 사용
+python scripts/05_cell_scoring.py \
+    --model_dir results/skin3/final_model_YYYYMMDD_HHMMSS \
+    --config config/scp1884.yaml \
+    --gpu 0
+```
+
+#### 6. Cross-disease 평가
+
+```bash
+# Skin3에서 학습한 모델로 SCP1884 평가
+python scripts/04_cross_disease_eval.py \
+    --model_dir results/skin3/final_model_YYYYMMDD_HHMMSS \
+    --test_config config/scp1884.yaml \
     --gpu 0
 ```
 
@@ -189,63 +254,57 @@ tuning:
   save_top_k: 3  # 상위 K개 조합 모델 저장
 ```
 
-## 출력 결과 및 모델 관리
+## 출력 결과
 
 ### 디렉토리 구조
+
 ```
-scMILDQ_Cond/results/
-├── pretrained/                        # 최종 pretrained encoder (수동 배치)
-│   ├── vq_aenb_conditional_whole.pth  # 모델 가중치
-│   └── study_mapping.json             # Study ID 매핑 (subset 학습 시 필수)
-├── pretrain_20260129_HHMMSS/          # pretrain 학습 결과 (타임스탬프)
-│   ├── vq_aenb_conditional.pth
-│   ├── study_mapping.json             # {study_id: study_name} 매핑
-│   └── training_history.json
+results/
+├── pretrained/                        # Pretrained encoder (수동 배치)
+│   ├── vq_aenb_conditional_whole.pth
+│   └── study_mapping.json
+│
 ├── skin3/
-│   ├── loocv_20260129_HHMMSS/         # LOOCV 결과
-│   │   ├── results.csv                # Fold별 메트릭
-│   │   ├── overall_results.csv        # 전체 AUROC (concatenated)
-│   │   ├── predictions.csv            # 샘플별 예측 확률
-│   │   └── models/
-│   └── tuning_20260129_HHMMSS/        # 튜닝 결과
-│       ├── tuning_results.csv         # 실시간 업데이트
-│       ├── best_params.yaml           # 최적 하이퍼파라미터
-│       └── models/                    # Top-K 모델 저장
-│           └── config_XXX/
-└── scp1884/
-    └── ...
+│   ├── loocv_YYYYMMDD_HHMMSS/         # LOOCV 결과
+│   │   ├── results.csv                # Fold별 정보
+│   │   ├── overall_results.csv        # 전체 AUROC
+│   │   ├── predictions.csv            # 샘플별 예측
+│   │   └── models/                    # Fold별 모델 (cell scoring용)
+│   │       ├── model_teacher_fold0.pt
+│   │       ├── model_student_fold0.pt
+│   │       └── ...
+│   │
+│   ├── tuning_YYYYMMDD_HHMMSS/        # 튜닝 결과
+│   │   ├── tuning_results.csv         # 전체 결과 (실시간 저장)
+│   │   ├── best_params.yaml           # 최적 하이퍼파라미터
+│   │   └── models/                    # Top-K 모델
+│   │
+│   ├── final_model_YYYYMMDD_HHMMSS/   # Final model
+│   │   ├── model_teacher_fold0.pt
+│   │   ├── model_student_fold0.pt
+│   │   ├── model_encoder_fold0.pt
+│   │   └── model_info.json
+│   │
+│   └── cell_scores_YYYYMMDD_HHMMSS/   # Cell scoring 결과
+│       ├── cell_scores.csv
+│       └── cell_scores.h5ad
+│
+├── scp1884/
+│   └── ...
+│
+└── vq_analysis/                       # VQ 분석 결과 (노트북)
+    ├── adata_with_vq.h5ad
+    ├── codebook_stats_whole.csv
+    └── figures/
 ```
-
-### 모델 배치 (수동)
-
-학습 결과는 **타임스탬프가 찍힌 폴더**에 저장됩니다. 최종 모델은 수동으로 지정된 경로에 복사해야 합니다:
-
-```bash
-# Pretrained encoder 배치 (모델 + study_mapping 모두 필요)
-mkdir -p results/pretrained
-cp results/pretrain_YYYYMMDD_HHMMSS/vq_aenb_conditional.pth \
-   results/pretrained/vq_aenb_conditional_whole.pth
-cp results/pretrain_YYYYMMDD_HHMMSS/study_mapping.json \
-   results/pretrained/study_mapping.json
-
-# Cross-disease 평가용 모델 배치 (예시)
-# skin3에서 학습한 모델로 scp1884 평가 시
-cp results/skin3/loocv_YYYYMMDD_HHMMSS/models/best_model.pth \
-   results/skin3/final_model.pth
-```
-
-**왜 수동인가?**
-- 여러 번 학습 후 best 모델 선택 가능
-- 실수로 좋은 모델이 덮어씌워지는 것 방지
-- 어떤 모델을 사용하는지 명시적으로 관리
 
 ### LOOCV 평가 메트릭
 
-LOOCV에서는 fold별 AUC가 아닌 **전체 예측을 concatenate하여 계산한 AUROC**를 사용합니다:
-- `overall_results.csv`: 전체 AUROC, Accuracy, F1 Score
-- `predictions.csv`: 각 샘플의 예측 확률 (추가 분석용)
+LOOCV에서는 각 fold의 테스트 샘플이 1개이므로 fold별 AUC가 무의미합니다.
+대신 **전체 예측을 concatenate하여 AUROC를 계산**합니다:
 
-이는 LOOCV에서 각 fold의 테스트 샘플이 1개이므로, fold별 AUC 계산이 무의미하기 때문입니다.
+- `overall_results.csv`: 전체 AUROC, Accuracy, F1 Score
+- `predictions.csv`: 각 샘플의 예측 확률
 
 ## 아키텍처
 
@@ -262,11 +321,23 @@ LOOCV에서는 fold별 AUC가 아닌 **전체 예측을 concatenate하여 계산
 (Bag-level) (Instance-level)
 ```
 
+## 분석 노트북
+
+### 01_vq_embedding_analysis.ipynb
+- 전체 adata에 VQ code 및 embedding 추출
+- Codebook statistics 계산 (disease ratio, organ ratio 등)
+- Subset별 분석
+
+### 02_codebook_visualization.ipynb
+- Codebook PCA/UMAP 시각화
+- Codebook leiden clustering → cell-level 적용
+- Special codes 식별 (cross-tissue, disease-specific 등)
+- Code-Sample heatmap
+
 ## 참고
 
 - **CLAUDE.md**: Claude AI가 프로젝트를 이해하기 위한 컨텍스트 파일
 - **legacy/**: 기존 스크립트 (참조용)
-- 새 파이프라인은 YAML 설정 기반으로 단순화됨
 
 ## Contact
 

@@ -61,33 +61,87 @@ scMILD/
 │       ├── splitter.py        # LOOCVSplitter, StratifiedKFoldSplitter
 │       └── preprocessing.py   # load_adata_with_subset 등
 ├── scripts/
-│   ├── 01_pretrain_encoder.py # Encoder pretrain + study_mapping.json 생성
-│   ├── 02_train_loocv.py      # LOOCV 기반 MIL 학습 (전체 AUROC 계산)
-│   ├── 03_evaluate.py         # 모델 평가
-│   ├── 04_analyze_attention.py # Attention 분석
-│   ├── 05_cross_disease.py    # Cross-disease 일반화
-│   └── 06_tune_hyperparams.py # Grid Search 튜닝
+│   ├── 01_pretrain_encoder.py    # Encoder pretrain (전체 데이터)
+│   ├── 02_train_loocv.py         # LOOCV 학습 (기본 파라미터)
+│   ├── 03_finalize_model.py      # Final model 학습 (best params)
+│   ├── 04_cross_disease_eval.py  # Cross-disease 평가
+│   ├── 05_cell_scoring.py        # Cell-level scoring
+│   └── 06_tune_hyperparams.py    # Grid Search 튜닝
+├── notebooks/
+│   ├── 01_vq_embedding_analysis.ipynb   # VQ code/embedding 추출
+│   └── 02_codebook_visualization.ipynb  # Codebook 시각화
 └── config/
     ├── default.yaml           # 기본 설정
     ├── skin3.yaml             # Skin3 (HS) 설정
     └── scp1884.yaml           # SCP1884 (CD) 설정
 ```
 
+## 파이프라인 흐름
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         전체 파이프라인 흐름                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. Pretrain Encoder (전체 데이터, unsupervised)                         │
+│         ↓                                                               │
+│  2. LOOCV 학습 (기본 파라미터로 baseline 확인)                            │
+│         ↓                                                               │
+│  3. 하이퍼파라미터 튜닝 (LOOCV 기반 grid search)                          │
+│         ↓ best_params.yaml                                              │
+│  4. Finalize Model (best params로 전체 subset 학습)                      │
+│         ↓ final_model                                                   │
+│  ┌──────┴──────┐                                                        │
+│  ↓             ↓                                                        │
+│  5a. Cell Scoring     5b. Cross-disease 평가                            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Cell Scoring 로직 (중요!)
+
+| 데이터 유형 | 사용 모델 | 이유 |
+|-------------|----------|------|
+| **학습 데이터** (예: Skin3) | LOOCV fold 모델들 | 각 샘플은 해당 샘플 제외 모델로 scoring (data leakage 방지) |
+| **평가 데이터** (예: SCP1884) | Final model | 학습에 포함되지 않았으므로 final model 사용 |
+
 ## 핵심 실행 흐름
 
 ```bash
 # 1. Encoder Pretrain (처음 한 번, 전체 데이터)
-python scripts/01_pretrain_encoder.py --config config/default.yaml
+python scripts/01_pretrain_encoder.py --config config/default.yaml --gpu 0
 
 # 1.1 Pretrain 결과물 배치 (수동)
 cp results/pretrain_*/vq_aenb_conditional.pth results/pretrained/vq_aenb_conditional_whole.pth
 cp results/pretrain_*/study_mapping.json results/pretrained/study_mapping.json
 
-# 2. MIL 학습 (LOOCV) - subset 데이터 사용
+# 2. LOOCV 학습 (baseline)
 python scripts/02_train_loocv.py --config config/skin3.yaml --gpu 0
 
-# 3. 하이퍼파라미터 튜닝 (선택)
-python scripts/06_tune_hyperparams.py --config config/skin3.yaml --gpu 0
+# 3. 하이퍼파라미터 튜닝
+python scripts/06_tune_hyperparams.py --config config/skin3.yaml --gpu 0 --verbose
+# → results/skin3/tuning_*/best_params.yaml 생성
+
+# 4. Final model 학습
+python scripts/03_finalize_model.py \
+    --config config/skin3.yaml \
+    --best_params results/skin3/tuning_*/best_params.yaml \
+    --gpu 0
+
+# 5a. Cell scoring (학습 데이터 - LOOCV 모델 사용)
+python scripts/05_cell_scoring.py \
+    --loocv_dir results/skin3/loocv_* \
+    --config config/skin3.yaml --gpu 0
+
+# 5b. Cell scoring (평가 데이터 - Final model 사용)
+python scripts/05_cell_scoring.py \
+    --model_dir results/skin3/final_model_* \
+    --config config/scp1884.yaml --gpu 0
+
+# 6. Cross-disease 평가
+python scripts/04_cross_disease_eval.py \
+    --model_dir results/skin3/final_model_* \
+    --test_config config/scp1884.yaml --gpu 0
 ```
 
 ## 데이터 구조
@@ -177,11 +231,15 @@ from src.models import VQEncoderWrapperConditional, TeacherBranch, StudentBranch
   - fold별 AUC는 테스트 샘플이 1개라 의미 없음
   - `overall_results.csv`에 전체 메트릭 저장
 
-### 3. 병원망 환경
+### 3. Cell Scoring 모델 선택
+- **학습 데이터**: LOOCV fold 모델 사용 (data leakage 방지)
+- **평가 데이터**: Final model 사용
+
+### 4. 병원망 환경
 - 외부 패키지 설치 제한
 - conda 환경 경로: `config.paths.conda_env`
 
-### 4. GPU 메모리
+### 5. GPU 메모리
 - SCP1884는 세포 수가 많아 subsampling 필요할 수 있음
 - `config.mil.subsampling.max_cells_per_sample`
 
@@ -218,9 +276,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 5. [ ] Pretrain 후 `study_mapping.json` 복사 확인
 6. [ ] Subset 데이터 사용 시 `conditional_embedding.mapping_path` 설정 확인
 
+## 분석 노트북
+
+### notebooks/01_vq_embedding_analysis.ipynb
+- 전체 adata에 VQ code 및 embedding 추출
+- `adata.obs['vq_code']`: 각 세포의 codebook index
+- `adata.obsm['X_vq']`: 각 세포의 quantized embedding
+- Codebook statistics (disease ratio, organ ratio 등)
+
+### notebooks/02_codebook_visualization.ipynb
+- Codebook PCA/UMAP + dendrogram
+- Codebook leiden clustering → cell-level 적용
+- Code cluster vs Cell cluster 비교 (ARI, NMI)
+- Special codes 식별 (cross-tissue, disease-specific 등)
+
 ## 변경 이력
 
-### 2026-01-30
+### 2026-01-30 (2차)
+- **문서 정비**
+  - README.md, CLAUDE.md 실제 스크립트 구조와 동기화
+  - 파이프라인 흐름 명확화 (튜닝 → finalize → cell scoring/cross-disease)
+  - Cell scoring 로직 설명 추가 (LOOCV vs Final model)
+
+- **노트북 추가**
+  - `notebooks/01_vq_embedding_analysis.ipynb`: VQ code/embedding 추출
+  - `notebooks/02_codebook_visualization.ipynb`: Codebook 시각화
+
+- **버그 수정**
+  - `trainer.py`: attention score squeeze 차원 오류 수정 (`squeeze(-1)` → `squeeze(0)`)
+
+### 2026-01-30 (1차)
 - **study_ids 전달 문제 수정**
   - Pretrain 시 `study_mapping.json` 자동 생성
   - MIL 학습 시 매핑 파일 로드하여 `study_id_numeric` 컬럼 생성
@@ -234,25 +319,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 - **LOOCV fold별 메트릭 계산 제거**
   - `train_fold()`에 `skip_fold_metrics` 파라미터 추가
   - LOOCV에서 불필요한 `_evaluate()`, `compute_metrics()` 호출 건너뜀
-  - sklearn 경고 제거 및 성능 개선
 
 - **하이퍼파라미터 튜닝 개선** (`06_tune_hyperparams.py`)
-  - 실시간 CSV 저장: 각 조합 완료 시마다 `tuning_results.csv` 업데이트
-  - Top-K 모델 저장: `config.tuning.save_top_k` 설정 (기본값: 3)
-  - `best_params.yaml`: 최적 하이퍼파라미터 별도 저장
-  - 튜닝 중 크래시 발생해도 결과 보존
+  - 실시간 CSV 저장
+  - Top-K 모델 저장
+  - `best_params.yaml` 저장
 
 - **기본값 수정**
-  - `student.optimize_period`: 3 → 1 (매 epoch마다 student 최적화)
-  - `tuning.epochs`: [100, 50] → [10, 30] (Transfer learning이므로 작은 epoch)
+  - `student.optimize_period`: 3 → 1
+  - `tuning.epochs`: [100, 50] → [10, 30]
 
-- **수정된 파일**
-  - `scripts/01_pretrain_encoder.py`
-  - `scripts/02_train_loocv.py`
-  - `scripts/06_tune_hyperparams.py`
-  - `src/training/trainer.py`
-  - `src/config.py`
-  - `src/data/__init__.py`
-  - `config/default.yaml`
+## TODO (미구현)
 
-- 세션 로그: `docs/session_log_20260130.md`
+- [ ] `03_finalize_model.py`: `--best_params` 옵션으로 best_params.yaml 자동 로드
+- [ ] `05_cell_scoring.py`: `--loocv_dir` 옵션으로 LOOCV 모드 지원
