@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 
 import torch
+torch.set_num_threads(16)
 import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader

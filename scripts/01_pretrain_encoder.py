@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 
 import torch
+torch.set_num_threads(16)
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 
