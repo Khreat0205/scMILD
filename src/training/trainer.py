@@ -338,8 +338,10 @@ class MILTrainer:
             # Get pseudo labels from teacher attention
             with torch.no_grad():
                 attn_scores = self.model_teacher.attention_module(feat)
-                pseudo_labels = self._normalize_attention(attn_scores).squeeze(-1)
-                # Handle single sample case (0-dim tensor after squeeze)
+                # attn_scores shape: (K, N) where K=1, N=batch_size
+                # We need shape (N,) for pseudo_labels
+                pseudo_labels = self._normalize_attention(attn_scores).squeeze(0)
+                # Handle edge case: single cell batch -> 0-dim tensor
                 if pseudo_labels.dim() == 0:
                     pseudo_labels = pseudo_labels.unsqueeze(0)
                 pseudo_labels = pseudo_labels.clamp(1e-5, 1 - 1e-5)
