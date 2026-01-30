@@ -75,14 +75,14 @@ def main():
     parser.add_argument("--gpu", type=int, default=0, help="GPU ID to use")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
-    # Model hyperparameters
-    parser.add_argument("--latent_dim", type=int, default=128, help="Latent dimension")
-    parser.add_argument("--num_codes", type=int, default=1024, help="Number of codebook entries")
-    parser.add_argument("--study_emb_dim", type=int, default=16, help="Study embedding dimension")
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
+    # Model hyperparameters (None means use config value)
+    parser.add_argument("--latent_dim", type=int, default=None, help="Latent dimension")
+    parser.add_argument("--num_codes", type=int, default=None, help="Number of codebook entries")
+    parser.add_argument("--study_emb_dim", type=int, default=None, help="Study embedding dimension")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+    parser.add_argument("--patience", type=int, default=None, help="Early stopping patience")
 
     args = parser.parse_args()
 
@@ -91,16 +91,28 @@ def main():
         config = load_config(args.config)
         adata_path = args.adata_path or config.data.whole_adata_path
         output_dir = args.output_dir or config.paths.output_root
-        latent_dim = args.latent_dim or config.encoder.latent_dim
-        num_codes = args.num_codes or config.encoder.num_codes
+        # Model hyperparameters: CLI args override config (None means use config)
+        latent_dim = args.latent_dim if args.latent_dim is not None else config.encoder.latent_dim
+        num_codes = args.num_codes if args.num_codes is not None else config.encoder.num_codes
+        study_emb_dim = args.study_emb_dim if args.study_emb_dim is not None else config.encoder.study_emb_dim
+        batch_size = args.batch_size if args.batch_size is not None else config.encoder.pretrain.batch_size
+        epochs = args.epochs if args.epochs is not None else config.encoder.pretrain.epochs
+        lr = args.lr if args.lr is not None else config.encoder.pretrain.learning_rate
+        patience = args.patience if args.patience is not None else config.encoder.pretrain.patience
         # Conditional embedding settings from config
         conditional_col = config.data.conditional_embedding.column  # e.g., 'study' or 'Organ'
         conditional_encoded_col = config.data.conditional_embedding.encoded_column  # e.g., 'study_id_numeric' or 'Organ_id_numeric'
     else:
         adata_path = args.adata_path
         output_dir = args.output_dir or "./results/pretrain"
-        latent_dim = args.latent_dim
-        num_codes = args.num_codes
+        # Default values when no config provided
+        latent_dim = args.latent_dim if args.latent_dim is not None else 128
+        num_codes = args.num_codes if args.num_codes is not None else 1024
+        study_emb_dim = args.study_emb_dim if args.study_emb_dim is not None else 16
+        batch_size = args.batch_size if args.batch_size is not None else 256
+        epochs = args.epochs if args.epochs is not None else 50
+        lr = args.lr if args.lr is not None else 0.001
+        patience = args.patience if args.patience is not None else 5
         # Default to 'study' for backward compatibility
         conditional_col = "study"
         conditional_encoded_col = "study_id_numeric"
@@ -170,7 +182,7 @@ def main():
     train_loader = create_dataloader(
         adata, device,
         conditional_col=conditional_encoded_col,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
         shuffle=True
     )
 
@@ -182,7 +194,7 @@ def main():
         device=device,
         hidden_layers=hidden_layers,
         n_studies=n_conditionals,  # n_studies is used for conditional embedding size
-        study_emb_dim=args.study_emb_dim,
+        study_emb_dim=study_emb_dim,
         num_codes=num_codes,
         commitment_weight=0.25
     )
@@ -190,7 +202,7 @@ def main():
 
     print(f"  Latent dim: {latent_dim}")
     print(f"  Num codes: {num_codes}")
-    print(f"  Conditional ({conditional_col}) embedding dim: {args.study_emb_dim}")
+    print(f"  Conditional ({conditional_col}) embedding dim: {study_emb_dim}")
     print(f"  Number of {conditional_col}s: {n_conditionals}")
     print(f"  Hidden layers: {hidden_layers}")
 
@@ -204,9 +216,9 @@ def main():
 
     history = trainer.train(
         train_loader=train_loader,
-        n_epochs=args.epochs,
-        learning_rate=args.lr,
-        patience=args.patience,
+        n_epochs=epochs,
+        learning_rate=lr,
+        patience=patience,
         init_codebook=True,
         init_method="kmeans"
     )
@@ -221,7 +233,7 @@ def main():
         'n_conditionals': n_conditionals,
         'conditional_column': conditional_col,
         'conditional_encoded_column': conditional_encoded_col,
-        'study_emb_dim': args.study_emb_dim,
+        'study_emb_dim': study_emb_dim,
         'num_codes': num_codes,
     }
     trainer.save(str(model_path), config_to_save)
