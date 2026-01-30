@@ -8,6 +8,10 @@ Final model을 학습합니다.
 Usage:
     python scripts/03_finalize_model.py --config config/skin3.yaml
     python scripts/03_finalize_model.py --config config/scp1884.yaml --gpu 0
+
+    # best_params.yaml 적용 (06_tune_hyperparams.py 결과물)
+    python scripts/03_finalize_model.py --config config/skin3.yaml \\
+        --best_params results/skin3/tuning_*/best_params.yaml --gpu 0
 """
 
 import os
@@ -16,6 +20,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+import yaml
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
@@ -34,6 +39,67 @@ from src.models import (
     VQEncoderWrapperConditional
 )
 from src.training import MILTrainer
+
+
+def load_best_params(best_params_path: str) -> dict:
+    """Load best hyperparameters from YAML file.
+
+    Args:
+        best_params_path: Path to best_params.yaml from tuning script
+
+    Returns:
+        Dictionary of hyperparameters
+    """
+    with open(best_params_path, 'r') as f:
+        data = yaml.safe_load(f)
+
+    best_params = data.get('best_hyperparameters', {})
+    best_score = data.get('best_score', {})
+
+    print(f"Loaded best params from: {best_params_path}")
+    print(f"  Best {best_score.get('metric', 'score')}: {best_score.get('value', 'N/A')}")
+    for key, value in best_params.items():
+        print(f"  {key}: {value}")
+
+    return best_params
+
+
+def apply_best_params(config: 'ScMILDConfig', best_params: dict) -> 'ScMILDConfig':
+    """Apply best hyperparameters to config.
+
+    Supported parameters:
+        - learning_rate -> config.mil.training.learning_rate
+        - encoder_learning_rate -> config.mil.training.encoder_learning_rate
+        - attention_dim -> config.mil.attention_dim
+        - latent_dim -> config.mil.latent_dim
+        - projection_dim -> config.mil.projection_dim
+        - negative_weight -> config.mil.loss.negative_weight
+        - student_optimize_period -> config.mil.student.optimize_period
+        - epochs -> config.mil.training.epochs
+    """
+    param_mapping = {
+        'learning_rate': ('mil', 'training', 'learning_rate'),
+        'encoder_learning_rate': ('mil', 'training', 'encoder_learning_rate'),
+        'attention_dim': ('mil', 'attention_dim'),
+        'latent_dim': ('mil', 'latent_dim'),
+        'projection_dim': ('mil', 'projection_dim'),
+        'negative_weight': ('mil', 'loss', 'negative_weight'),
+        'student_optimize_period': ('mil', 'student', 'optimize_period'),
+        'epochs': ('mil', 'training', 'epochs'),
+    }
+
+    for param_name, value in best_params.items():
+        if param_name in param_mapping:
+            path = param_mapping[param_name]
+            obj = config
+            for attr in path[:-1]:
+                obj = getattr(obj, attr)
+            setattr(obj, path[-1], value)
+            print(f"  Applied: {'.'.join(path)} = {value}")
+        else:
+            print(f"  Warning: Unknown parameter '{param_name}', skipping")
+
+    return config
 
 
 def set_seed(seed: int):
@@ -170,6 +236,8 @@ def create_models(config: ScMILDConfig, device: torch.device, encoder_path: str)
 def main():
     parser = argparse.ArgumentParser(description="Train final scMILD model on full data")
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
+    parser.add_argument("--best_params", type=str, default=None,
+                        help="Path to best_params.yaml from tuning script")
     parser.add_argument("--gpu", type=int, default=0, help="GPU ID to use")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--epochs", type=int, default=None, help="Override epochs from config")
@@ -178,6 +246,14 @@ def main():
 
     # Load config
     config = load_config(args.config)
+
+    # Apply best params if provided
+    if args.best_params:
+        print(f"\n{'='*60}")
+        print("Loading Best Hyperparameters")
+        print(f"{'='*60}")
+        best_params = load_best_params(args.best_params)
+        config = apply_best_params(config, best_params)
 
     # Set seed
     set_seed(args.seed)
@@ -263,9 +339,19 @@ def main():
     import json
     model_info = {
         'config_path': args.config,
+        'best_params_path': args.best_params,
         'n_samples': n_samples,
         'n_cells': adata.n_obs,
         'n_epochs': n_epochs,
+        'hyperparameters': {
+            'learning_rate': config.mil.training.learning_rate,
+            'encoder_learning_rate': config.mil.training.encoder_learning_rate,
+            'attention_dim': config.mil.attention_dim,
+            'latent_dim': config.mil.latent_dim,
+            'projection_dim': config.mil.projection_dim,
+            'negative_weight': config.mil.loss.negative_weight,
+            'student_optimize_period': config.mil.student.optimize_period,
+        },
         'training_metrics': result.metrics,
         'embedding_column': config.data.conditional_embedding.column,
         'timestamp': timestamp

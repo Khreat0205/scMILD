@@ -331,5 +331,5 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 ## TODO (미구현)
 
-- [ ] `03_finalize_model.py`: `--best_params` 옵션으로 best_params.yaml 자동 로드
+- [x] `03_finalize_model.py`: `--best_params` 옵션으로 best_params.yaml 자동 로드 (2026-01-30 완료)
 - [ ] `05_cell_scoring.py`: `--loocv_dir` 옵션으로 LOOCV 모드 지원
