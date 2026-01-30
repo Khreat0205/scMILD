@@ -95,6 +95,7 @@ class EncoderConfig:
     latent_dim: int = 128
     num_codes: int = 1024
     study_emb_dim: int = 16  # Conditional embedding dimension
+    hidden_layers: List[int] = field(default_factory=lambda: [512, 256, 128])  # Encoder/Decoder hidden layers
     pretrain: EncoderPretrainConfig = field(default_factory=EncoderPretrainConfig)
 
 
@@ -372,6 +373,7 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
         latent_dim=encoder_dict.get("latent_dim", 128),
         num_codes=encoder_dict.get("num_codes", 1024),
         study_emb_dim=encoder_dict.get("study_emb_dim", 16),
+        hidden_layers=encoder_dict.get("hidden_layers", [512, 256, 128]),
         pretrain=pretrain,
     )
 

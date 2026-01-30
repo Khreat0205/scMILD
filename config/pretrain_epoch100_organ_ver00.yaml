@@ -81,13 +81,14 @@ encoder:
   # 아키텍처
   latent_dim: 128
   num_codes: 512
-
+  study_emb_dim: 1 
+  hidden_layers: [512, 256, 128]
   # 학습 설정 (pretrain용)
   pretrain:
-    batch_size: 256
-    learning_rate: 0.0001
+    batch_size: 512
+    learning_rate: 0.001
     epochs: 100
-    patience: 5
+    patience: 10
 
 # ============================================================================
 # MIL (scMILD) 설정
@@ -159,7 +160,7 @@ logging:
 
   # 체크포인트 저장
   save_checkpoints: true
-  checkpoint_frequency: 10  # epochs
+  checkpoint_frequency: 1  # epochs
 
 # ============================================================================
 # 하드웨어 설정

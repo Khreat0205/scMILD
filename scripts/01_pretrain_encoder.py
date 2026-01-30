@@ -79,6 +79,7 @@ def main():
     parser.add_argument("--latent_dim", type=int, default=None, help="Latent dimension")
     parser.add_argument("--num_codes", type=int, default=None, help="Number of codebook entries")
     parser.add_argument("--study_emb_dim", type=int, default=None, help="Study embedding dimension")
+    parser.add_argument("--hidden_layers", type=int, nargs='+', default=None, help="Hidden layer dimensions (e.g., --hidden_layers 512 128)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
@@ -95,6 +96,7 @@ def main():
         latent_dim = args.latent_dim if args.latent_dim is not None else config.encoder.latent_dim
         num_codes = args.num_codes if args.num_codes is not None else config.encoder.num_codes
         study_emb_dim = args.study_emb_dim if args.study_emb_dim is not None else config.encoder.study_emb_dim
+        hidden_layers = args.hidden_layers if args.hidden_layers is not None else config.encoder.hidden_layers
         batch_size = args.batch_size if args.batch_size is not None else config.encoder.pretrain.batch_size
         epochs = args.epochs if args.epochs is not None else config.encoder.pretrain.epochs
         lr = args.lr if args.lr is not None else config.encoder.pretrain.learning_rate
@@ -109,6 +111,7 @@ def main():
         latent_dim = args.latent_dim if args.latent_dim is not None else 128
         num_codes = args.num_codes if args.num_codes is not None else 1024
         study_emb_dim = args.study_emb_dim if args.study_emb_dim is not None else 16
+        hidden_layers = args.hidden_layers if args.hidden_layers is not None else [512, 256, 128]
         batch_size = args.batch_size if args.batch_size is not None else 256
         epochs = args.epochs if args.epochs is not None else 50
         lr = args.lr if args.lr is not None else 0.001
@@ -173,9 +176,6 @@ def main():
     # Get input dimension
     input_dim = adata.n_vars
     print(f"Input dimension: {input_dim}")
-
-    # Hidden layers
-    hidden_layers = [512, 256, 128]
 
     # Create dataloader
     print("\nCreating dataloader...")
