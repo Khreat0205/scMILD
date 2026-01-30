@@ -94,6 +94,7 @@ class EncoderConfig:
     type: str = "VQ_AENB_Conditional"
     latent_dim: int = 128
     num_codes: int = 1024
+    study_emb_dim: int = 16  # Conditional embedding dimension
     pretrain: EncoderPretrainConfig = field(default_factory=EncoderPretrainConfig)
 
 
@@ -370,6 +371,7 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
         type=encoder_dict.get("type", "VQ_AENB_Conditional"),
         latent_dim=encoder_dict.get("latent_dim", 128),
         num_codes=encoder_dict.get("num_codes", 1024),
+        study_emb_dim=encoder_dict.get("study_emb_dim", 16),
         pretrain=pretrain,
     )
 
