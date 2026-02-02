@@ -114,12 +114,20 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
 - **Import 에러**: `sys.path.insert(0, str(Path(__file__).parent.parent))`
 - **CUDA OOM**: `config.mil.subsampling.enabled: true` 또는 batch_size 감소
 - **Mapping 경고**: pretrain 후 생성된 `{column}_mapping.json`을 config 경로에 복사
+- **Pretrain NaN 발생** (`num_codes` 증가 시):
+  - 원인: Dead code revival 로직이 대량의 코드를 동시에 재초기화 → codebook 불안정
+  - 해결: `encoder.pretrain.batch_size` 증가 (512→2048 권장) 또는 dead code revival 비활성화
 
 ## 변경 이력
 
 상세 변경 이력은 `docs/session_log_*.md` 참조
 
-### 최근 주요 변경 (2026-01-30)
+### 최근 주요 변경 (2026-02-02)
+- Gradient clipping 추가 (`trainer_ae.py`): `max_norm=1.0`
+- NaN 발생 원인 분석: `num_codes` 증가 시 dead code revival 로직 불안정
+- 해결 방안 정리: batch size 증가, dead code revival 완화 등
+
+### 이전 변경 (2026-01-30)
 - Conditional Embedding 일반화: Study/Organ 등 임의의 categorical 컬럼 지원
 - Pretrain 스크립트: CLI 기본값 버그 수정 (config 값 우선 적용)
 - 메모리 관리: LOOCV fold 간 GPU 메모리 정리 추가
@@ -127,3 +135,5 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
 
 ## TODO
 - [ ] `05_cell_scoring.py`: `--loocv_dir` 옵션으로 LOOCV 모드 지원
+- [ ] Pretrain: `num_codes` 증가 시 NaN 방지 (batch size 증가 또는 dead code revival 개선)
+- [ ] K-means 초기화: conditional column 기준 stratified sampling 지원
