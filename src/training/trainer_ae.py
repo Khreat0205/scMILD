@@ -182,6 +182,7 @@ class AETrainer:
             # Backward
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             optimizer.step()
 
             total_loss += loss.item()
