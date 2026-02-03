@@ -71,7 +71,8 @@ class AETrainer:
         learning_rate: float = 0.001,
         patience: int = 5,
         init_codebook: bool = True,
-        init_method: str = "kmeans"
+        init_method: str = "kmeans",
+        stratify_codebook: bool = None
     ) -> Dict[str, list]:
         """
         Train the autoencoder.
@@ -84,16 +85,23 @@ class AETrainer:
             patience: Patience for early stopping
             init_codebook: Whether to initialize codebook
             init_method: Codebook initialization method
+            stratify_codebook: Whether to use stratified sampling for codebook init.
+                               If None, uses stratified sampling for conditional models.
 
         Returns:
             history: Dictionary with training history
         """
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
 
+        # Determine stratification strategy
+        if stratify_codebook is None:
+            stratify_codebook = self.is_conditional
+
         # Initialize codebook
         if init_codebook and hasattr(self.model, 'init_codebook'):
-            print("Initializing codebook...")
-            self.model.init_codebook(train_loader, method=init_method)
+            stratify_msg = " (stratified)" if stratify_codebook else ""
+            print(f"Initializing codebook{stratify_msg}...")
+            self.model.init_codebook(train_loader, method=init_method, stratify=stratify_codebook)
 
         history = {
             'train_loss': [],

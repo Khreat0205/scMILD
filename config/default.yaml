@@ -66,7 +66,7 @@ splitting:
 
   # K-Fold 설정 (strategy가 kfold 계열일 때만 사용)
   n_splits: 5
-  n_repeats: 3
+  n_repeats: 1  # Repeated K-Fold 반복 횟수 (default: 1)
 
   # 랜덤 시드
   random_seed: 42
@@ -81,6 +81,7 @@ encoder:
   # 아키텍처
   latent_dim: 128
   num_codes: 1024
+  conditional_emb_dim: 16  # Conditional embedding dimension (study/organ 등)
 
   # 학습 설정 (pretrain용)
   pretrain:
@@ -176,8 +177,6 @@ hardware:
 # 하이퍼파라미터 튜닝 설정
 # ============================================================================
 tuning:
-  enabled: false
-
   # Search space (Grid Search)
   # Transfer learning 개념이므로 작은 epoch 사용 권장
   learning_rate: [0.001, 0.0001]
@@ -197,6 +196,5 @@ tuning:
 # ============================================================================
 # TODO (향후 구현 예정)
 # ============================================================================
-# - Repeated Stratified K-Fold 옵션
 # - MLflow/W&B 통합
 # - Optuna 기반 최적화

@@ -309,19 +309,21 @@ class VQ_AENB_Conditional(nn.Module):
     """
     Conditional Vector Quantized Autoencoder with Negative Binomial loss.
 
-    Study/Batch 정보를 Encoder와 Decoder에 주입합니다 (scVI 스타일).
-    Cross-study generalization을 위한 organ-mixed codebook을 학습합니다.
+    Conditional 정보(study, organ 등)를 Encoder와 Decoder에 주입합니다 (scVI 스타일).
+    Cross-condition generalization을 위한 mixed codebook을 학습합니다.
 
     Args:
         input_dim: Dimension of input features (number of genes)
         latent_dim: Dimension of latent space (before quantization)
         device: Device to run the model on
         hidden_layers: List of hidden layer dimensions
-        n_studies: Number of unique studies/batches
-        study_emb_dim: Dimension of study embedding
+        n_conditionals: Number of unique conditional categories (e.g., studies, organs)
+        conditional_emb_dim: Dimension of conditional embedding
         num_codes: Number of codes in the codebook
         commitment_weight: Weight for commitment loss
         activation_function: Activation function class
+        n_studies: Deprecated, use n_conditionals instead
+        study_emb_dim: Deprecated, use conditional_emb_dim instead
     """
 
     def __init__(
@@ -330,13 +332,26 @@ class VQ_AENB_Conditional(nn.Module):
         latent_dim: int,
         device: torch.device,
         hidden_layers: List[int],
-        n_studies: int,
-        study_emb_dim: int = 16,
+        n_conditionals: int = None,
+        conditional_emb_dim: int = 16,
         num_codes: int = 256,
         commitment_weight: float = 0.25,
-        activation_function=nn.ReLU
+        activation_function=nn.ReLU,
+        # Deprecated parameters (for backward compatibility)
+        n_studies: int = None,
+        study_emb_dim: int = None,
     ):
         super().__init__()
+
+        # Backward compatibility: support old parameter names
+        if n_conditionals is None and n_studies is not None:
+            n_conditionals = n_studies
+        if study_emb_dim is not None:
+            conditional_emb_dim = study_emb_dim
+
+        if n_conditionals is None:
+            raise ValueError("n_conditionals (or n_studies) must be provided")
+
         self.device = device
         self.latent_dim = latent_dim
         self.input_dim = input_dim
@@ -345,15 +360,21 @@ class VQ_AENB_Conditional(nn.Module):
         self.activation_function = activation_function
         self.num_codes = num_codes
         self.commitment_weight = commitment_weight
-        self.n_studies = n_studies
-        self.study_emb_dim = study_emb_dim
+        self.n_conditionals = n_conditionals
+        self.conditional_emb_dim = conditional_emb_dim
 
-        # Study embedding (shared between encoder and decoder)
-        self.study_embedding = nn.Embedding(n_studies, study_emb_dim)
+        # Backward compatibility aliases
+        self.n_studies = n_conditionals
+        self.study_emb_dim = conditional_emb_dim
 
-        # Encoder: input_dim + study_emb_dim → latent_dim
+        # Conditional embedding (shared between encoder and decoder)
+        self.conditional_embedding = nn.Embedding(n_conditionals, conditional_emb_dim)
+        # Backward compatibility alias
+        self.study_embedding = self.conditional_embedding
+
+        # Encoder: input_dim + conditional_emb_dim → latent_dim
         encoder_layers = []
-        previous_dim = input_dim + study_emb_dim  # Conditional input
+        previous_dim = input_dim + conditional_emb_dim  # Conditional input
         for layer_dim in self.hidden_layers:
             encoder_layers.append(nn.Linear(previous_dim, layer_dim))
             encoder_layers.append(self.activation_function())
@@ -368,9 +389,9 @@ class VQ_AENB_Conditional(nn.Module):
             commitment_weight=commitment_weight
         )
 
-        # Decoder: latent_dim + study_emb_dim → input_dim * 2
+        # Decoder: latent_dim + conditional_emb_dim → input_dim * 2
         decoder_layers = []
-        previous_dim = latent_dim + study_emb_dim  # Conditional input
+        previous_dim = latent_dim + conditional_emb_dim  # Conditional input
         for layer_dim in reversed(self.hidden_layers):
             decoder_layers.append(nn.Linear(previous_dim, layer_dim))
             decoder_layers.append(self.activation_function())
@@ -383,11 +404,11 @@ class VQ_AENB_Conditional(nn.Module):
     def encoder_forward(
         self,
         x: torch.Tensor,
-        study_ids: torch.Tensor
+        conditional_ids: torch.Tensor
     ) -> torch.Tensor:
-        """Encode input with study condition to continuous latent representation."""
-        s_emb = self.study_embedding(study_ids)  # (batch, study_emb_dim)
-        x_cond = torch.cat([x, s_emb], dim=-1)   # (batch, input_dim + study_emb_dim)
+        """Encode input with conditional information to continuous latent representation."""
+        c_emb = self.conditional_embedding(conditional_ids)  # (batch, conditional_emb_dim)
+        x_cond = torch.cat([x, c_emb], dim=-1)   # (batch, input_dim + conditional_emb_dim)
         return self.encoder(x_cond)
 
     def quantize(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -397,11 +418,11 @@ class VQ_AENB_Conditional(nn.Module):
     def decoder(
         self,
         z: torch.Tensor,
-        study_ids: torch.Tensor
+        conditional_ids: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Decode latent representation with study condition."""
-        s_emb = self.study_embedding(study_ids)  # (batch, study_emb_dim)
-        z_cond = torch.cat([z, s_emb], dim=-1)   # (batch, latent_dim + study_emb_dim)
+        """Decode latent representation with conditional information."""
+        c_emb = self.conditional_embedding(conditional_ids)  # (batch, conditional_emb_dim)
+        z_cond = torch.cat([z, c_emb], dim=-1)   # (batch, latent_dim + conditional_emb_dim)
         decoded = self.decoder_layers(z_cond)
         mu_recon = torch.exp(decoded[:, :self.input_dim]).clamp(1e-6, 1e6)
         theta_recon = F.softplus(decoded[:, self.input_dim:]).clamp(1e-4, 1e4)
@@ -410,7 +431,7 @@ class VQ_AENB_Conditional(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        study_ids: torch.Tensor,
+        conditional_ids: torch.Tensor,
         y: Optional[torch.Tensor] = None,
         is_train: bool = True
     ) -> Union[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
@@ -419,7 +440,7 @@ class VQ_AENB_Conditional(nn.Module):
 
         Args:
             x: Input data (batch_size, input_dim)
-            study_ids: Study/batch indices (batch_size,)
+            conditional_ids: Conditional category indices (batch_size,)
             y: Labels (not used, kept for compatibility)
             is_train: Whether in training mode
 
@@ -428,58 +449,64 @@ class VQ_AENB_Conditional(nn.Module):
             theta_recon: Reconstructed dispersion parameters
             commitment_loss: Loss from vector quantization (only if is_train=True)
         """
-        z = self.encoder_forward(x, study_ids)
+        z = self.encoder_forward(x, conditional_ids)
         z_q, commitment_loss = self.quantize(z)
-        mu_recon, theta_recon = self.decoder(z_q, study_ids)
+        mu_recon, theta_recon = self.decoder(z_q, conditional_ids)
 
         if is_train:
             return mu_recon, theta_recon, commitment_loss
         else:
             return mu_recon, theta_recon
 
-    def features(self, x: torch.Tensor, study_ids: torch.Tensor) -> torch.Tensor:
+    def features(self, x: torch.Tensor, conditional_ids: torch.Tensor) -> torch.Tensor:
         """
         Get quantized features for downstream tasks.
 
         Args:
             x: Input data
-            study_ids: Study/batch indices
+            conditional_ids: Conditional category indices
 
         Returns:
             z_q: Quantized latent representation
         """
-        z = self.encoder_forward(x, study_ids)
+        z = self.encoder_forward(x, conditional_ids)
         z_q, _ = self.quantize(z)
         return z_q
 
     def get_codebook_indices(
         self,
         x: torch.Tensor,
-        study_ids: torch.Tensor
+        conditional_ids: torch.Tensor
     ) -> torch.Tensor:
         """
         Get codebook indices for input data.
 
         Args:
             x: Input data
-            study_ids: Study/batch indices
+            conditional_ids: Conditional category indices
 
         Returns:
             indices: Codebook indices for each sample
         """
-        z = self.encoder_forward(x, study_ids)
+        z = self.encoder_forward(x, conditional_ids)
         indices = self.quantizer.encode_indices(z)
         return indices
 
+    def get_conditional_embeddings(self) -> np.ndarray:
+        """Get learned conditional embeddings for analysis."""
+        return self.conditional_embedding.weight.detach().cpu().numpy()
+
+    # Backward compatibility alias
     def get_study_embeddings(self) -> np.ndarray:
-        """Get learned study embeddings for analysis."""
-        return self.study_embedding.weight.detach().cpu().numpy()
+        """Deprecated: Use get_conditional_embeddings() instead."""
+        return self.get_conditional_embeddings()
 
     def init_codebook(
         self,
         dataloader,
         method: str = "kmeans",
-        num_samples: int = None
+        num_samples: int = None,
+        stratify: bool = False
     ):
         """
         Initialize codebook using training data.
@@ -489,6 +516,8 @@ class VQ_AENB_Conditional(nn.Module):
             method: Initialization method ("kmeans", "random", "uniform")
             num_samples: Number of samples to use for initialization.
                          If None, uses all data or at least 40 * num_codes for kmeans.
+            stratify: If True, perform stratified sampling based on conditional IDs
+                      to ensure all conditions are represented in codebook initialization.
         """
         # For k-means, faiss recommends at least 39 * k training points
         min_samples_for_kmeans = self.num_codes * 40 if method == "kmeans" else 10000
@@ -496,22 +525,76 @@ class VQ_AENB_Conditional(nn.Module):
             num_samples = min_samples_for_kmeans
 
         embeddings = []
+        conditional_ids = []  # For stratified sampling
         count = 0
+
+        # Collect more samples if stratified (to ensure enough samples per group)
+        collect_samples = num_samples * 2 if stratify else num_samples
 
         with torch.no_grad():
             for batch in dataloader:
                 data = batch[0].to(self.device)
-                study_ids = batch[1].to(self.device) if len(batch) > 1 else \
+                cond_ids = batch[1].to(self.device) if len(batch) > 1 else \
                     torch.zeros(data.shape[0], dtype=torch.long, device=self.device)
-                z = self.encoder_forward(data, study_ids)
+                z = self.encoder_forward(data, cond_ids)
                 embeddings.append(z)
+                conditional_ids.append(cond_ids)
                 count += z.shape[0]
-                if count >= num_samples:
+                if count >= collect_samples:
                     break
 
-        embeddings = torch.cat(embeddings, dim=0)[:num_samples]
+        embeddings = torch.cat(embeddings, dim=0)
+        conditional_ids = torch.cat(conditional_ids, dim=0)
+
+        # Apply stratified sampling if requested
+        if stratify:
+            unique_conds = torch.unique(conditional_ids)
+            if len(unique_conds) > 1:
+                selected_indices = self._stratified_sample(
+                    conditional_ids,
+                    n_samples=num_samples
+                )
+                embeddings = embeddings[selected_indices]
+                print(f"  Stratified sampling: {len(unique_conds)} groups, "
+                      f"{num_samples // len(unique_conds)} samples per group")
+            else:
+                embeddings = embeddings[:num_samples]
+        else:
+            embeddings = embeddings[:num_samples]
+
         self.quantizer.init_codebook(embeddings, method=method)
         print(f"Initialized codebook with {method} using {embeddings.shape[0]} samples")
+
+    def _stratified_sample(
+        self,
+        group_ids: torch.Tensor,
+        n_samples: int
+    ) -> torch.Tensor:
+        """
+        Perform stratified sampling to get equal samples from each group.
+
+        Args:
+            group_ids: Tensor of group IDs for each sample
+            n_samples: Total number of samples to select
+
+        Returns:
+            selected_indices: Indices of selected samples
+        """
+        unique_groups = torch.unique(group_ids)
+        n_groups = len(unique_groups)
+        samples_per_group = n_samples // n_groups
+
+        selected = []
+        for gid in unique_groups:
+            mask = (group_ids == gid)
+            indices = torch.where(mask)[0]
+            n_select = min(samples_per_group, len(indices))
+
+            # Random permutation for selection
+            perm = torch.randperm(len(indices), device=indices.device)[:n_select]
+            selected.append(indices[perm])
+
+        return torch.cat(selected)
 
     def _initialize_weights(self):
         """Initialize weights for encoder and decoder."""

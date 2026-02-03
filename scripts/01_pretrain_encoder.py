@@ -7,12 +7,14 @@
 
 Usage:
     python scripts/01_pretrain_encoder.py --config config/default.yaml
+    python scripts/01_pretrain_encoder.py --config config/default.yaml --register  # 자동 등록
     python scripts/01_pretrain_encoder.py --adata_path /path/to/data.h5ad --output_dir /path/to/output
 """
 
 import os
 import sys
 import argparse
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -79,14 +81,27 @@ def main():
     # Model hyperparameters (None means use config value)
     parser.add_argument("--latent_dim", type=int, default=None, help="Latent dimension")
     parser.add_argument("--num_codes", type=int, default=None, help="Number of codebook entries")
-    parser.add_argument("--study_emb_dim", type=int, default=None, help="Study embedding dimension")
+    parser.add_argument("--conditional_emb_dim", type=int, default=None,
+        help="Conditional embedding dimension (replaces --study_emb_dim)")
+    # Backward compatibility alias
+    parser.add_argument("--study_emb_dim", type=int, default=None,
+        help="(Deprecated) Use --conditional_emb_dim instead")
     parser.add_argument("--hidden_layers", type=int, nargs='+', default=None, help="Hidden layer dimensions (e.g., --hidden_layers 512 128)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
     parser.add_argument("--patience", type=int, default=None, help="Early stopping patience")
 
+    # Auto-registration options
+    parser.add_argument("--register", action="store_true",
+        help="자동으로 pretrained 디렉토리에 등록 (기존 파일 백업)")
+    parser.add_argument("--pretrained_dir", type=str, default=None,
+        help="등록할 pretrained 디렉토리 경로 (기본: config에서 추론)")
+
     args = parser.parse_args()
+
+    # Handle deprecated --study_emb_dim argument
+    conditional_emb_dim_arg = args.conditional_emb_dim or args.study_emb_dim
 
     # Load config if provided
     if args.config:
@@ -96,7 +111,7 @@ def main():
         # Model hyperparameters: CLI args override config (None means use config)
         latent_dim = args.latent_dim if args.latent_dim is not None else config.encoder.latent_dim
         num_codes = args.num_codes if args.num_codes is not None else config.encoder.num_codes
-        study_emb_dim = args.study_emb_dim if args.study_emb_dim is not None else config.encoder.study_emb_dim
+        conditional_emb_dim = conditional_emb_dim_arg if conditional_emb_dim_arg is not None else config.encoder.conditional_emb_dim
         hidden_layers = args.hidden_layers if args.hidden_layers is not None else config.encoder.hidden_layers
         batch_size = args.batch_size if args.batch_size is not None else config.encoder.pretrain.batch_size
         epochs = args.epochs if args.epochs is not None else config.encoder.pretrain.epochs
@@ -111,7 +126,7 @@ def main():
         # Default values when no config provided
         latent_dim = args.latent_dim if args.latent_dim is not None else 128
         num_codes = args.num_codes if args.num_codes is not None else 1024
-        study_emb_dim = args.study_emb_dim if args.study_emb_dim is not None else 16
+        conditional_emb_dim = conditional_emb_dim_arg if conditional_emb_dim_arg is not None else 16
         hidden_layers = args.hidden_layers if args.hidden_layers is not None else [512, 256, 128]
         batch_size = args.batch_size if args.batch_size is not None else 256
         epochs = args.epochs if args.epochs is not None else 50
@@ -194,8 +209,8 @@ def main():
         latent_dim=latent_dim,
         device=device,
         hidden_layers=hidden_layers,
-        n_studies=n_conditionals,  # n_studies is used for conditional embedding size
-        study_emb_dim=study_emb_dim,
+        n_conditionals=n_conditionals,
+        conditional_emb_dim=conditional_emb_dim,
         num_codes=num_codes,
         commitment_weight=0.25
     )
@@ -203,7 +218,7 @@ def main():
 
     print(f"  Latent dim: {latent_dim}")
     print(f"  Num codes: {num_codes}")
-    print(f"  Conditional ({conditional_col}) embedding dim: {study_emb_dim}")
+    print(f"  Conditional ({conditional_col}) embedding dim: {conditional_emb_dim}")
     print(f"  Number of {conditional_col}s: {n_conditionals}")
     print(f"  Hidden layers: {hidden_layers}")
 
@@ -230,11 +245,12 @@ def main():
         'input_dim': input_dim,
         'latent_dim': latent_dim,
         'hidden_layers': hidden_layers,
-        'n_studies': n_conditionals,  # Keep 'n_studies' key for backward compatibility
         'n_conditionals': n_conditionals,
+        'n_studies': n_conditionals,  # Backward compatibility
         'conditional_column': conditional_col,
         'conditional_encoded_column': conditional_encoded_col,
-        'study_emb_dim': study_emb_dim,
+        'conditional_emb_dim': conditional_emb_dim,
+        'study_emb_dim': conditional_emb_dim,  # Backward compatibility
         'num_codes': num_codes,
     }
     trainer.save(str(model_path), config_to_save)
@@ -264,6 +280,47 @@ def main():
     print(f"Model saved to: {model_path}")
     print(f"History saved to: {history_path}")
     print(f"{conditional_col} mapping saved to: {mapping_path}")
+
+    # Auto-registration to pretrained directory
+    if args.register:
+        print(f"\n{'='*60}")
+        print("Registering to pretrained directory...")
+        print(f"{'='*60}")
+
+        # Determine pretrained directory
+        if args.pretrained_dir:
+            pretrained_dir = Path(args.pretrained_dir)
+        elif args.config:
+            # Infer from config's pretrained_encoder path
+            pretrained_dir = Path(config.paths.pretrained_encoder).parent
+        else:
+            pretrained_dir = Path(output_dir) / "pretrained"
+
+        pretrained_dir.mkdir(parents=True, exist_ok=True)
+
+        # Target file paths
+        target_model = pretrained_dir / "vq_aenb_conditional.pth"
+        target_mapping = pretrained_dir / mapping_filename
+
+        # Backup existing files if they exist
+        if target_model.exists():
+            backup_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_model = pretrained_dir / f"vq_aenb_conditional_backup_{backup_timestamp}.pth"
+            shutil.move(str(target_model), str(backup_model))
+            print(f"  Backed up existing model to: {backup_model.name}")
+
+        if target_mapping.exists():
+            backup_mapping = pretrained_dir / f"{mapping_filename.replace('.json', '')}_backup_{backup_timestamp}.json"
+            shutil.move(str(target_mapping), str(backup_mapping))
+            print(f"  Backed up existing mapping to: {backup_mapping.name}")
+
+        # Copy new files
+        shutil.copy(str(model_path), str(target_model))
+        shutil.copy(str(mapping_path), str(target_mapping))
+
+        print(f"\n  Registered model to: {target_model}")
+        print(f"  Registered mapping to: {target_mapping}")
+        print(f"\nPretrained directory: {pretrained_dir}")
 
 
 if __name__ == "__main__":

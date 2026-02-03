@@ -2,7 +2,8 @@
 """
 06_tune_hyperparams.py - Grid Search 하이퍼파라미터 튜닝 스크립트
 
-LOOCV 기반 Grid Search를 수행하여 최적의 하이퍼파라미터 조합을 찾습니다.
+Cross-Validation 기반 Grid Search를 수행하여 최적의 하이퍼파라미터 조합을 찾습니다.
+LOOCV, Stratified K-Fold, Repeated Stratified K-Fold 등 다양한 CV 전략을 지원합니다.
 
 Features:
     - 실시간 CSV 저장: 각 조합 완료 시마다 tuning_results.csv 업데이트
@@ -38,7 +39,7 @@ from torch.utils.data import DataLoader
 from src.config import load_config, ScMILDConfig
 from src.data import (
     load_adata_with_subset, print_adata_summary,
-    LOOCVSplitter, get_sample_info_from_adata,
+    create_splitter, get_sample_info_from_adata,
     MilDataset, InstanceDataset, collate_mil, create_instance_dataset_with_bag_labels
 )
 from src.models import (
@@ -188,8 +189,8 @@ def create_models(config: ScMILDConfig, device: torch.device, encoder_path: str)
         latent_dim=model_config['latent_dim'],
         device=device,
         hidden_layers=model_config['hidden_layers'],
-        n_studies=model_config['n_studies'],
-        study_emb_dim=model_config.get('study_emb_dim', 16),
+        n_conditionals=model_config.get('n_conditionals', model_config.get('n_studies')),
+        conditional_emb_dim=model_config.get('conditional_emb_dim', model_config.get('study_emb_dim', 16)),
         num_codes=model_config.get('num_codes', 1024),
     )
     encoder_model.load_state_dict(checkpoint['model_state_dict'])
@@ -230,7 +231,7 @@ def create_models(config: ScMILDConfig, device: torch.device, encoder_path: str)
     return model_teacher, model_student, model_encoder
 
 
-def run_loocv_for_hyperparams(
+def run_cv_for_hyperparams(
     adata,
     config: ScMILDConfig,
     device: torch.device,
@@ -243,7 +244,8 @@ def run_loocv_for_hyperparams(
     return_models: bool = False
 ) -> dict:
     """
-    주어진 하이퍼파라미터로 전체 LOOCV를 수행하고 평균 메트릭 반환.
+    주어진 하이퍼파라미터로 Cross-Validation을 수행하고 평균 메트릭 반환.
+    LOOCV, Stratified K-Fold, Repeated Stratified K-Fold 등을 지원합니다.
 
     Args:
         return_models: True이면 fold별 모델들도 반환
@@ -255,6 +257,7 @@ def run_loocv_for_hyperparams(
     sample_col = config.data.columns.sample_id
     label_col = config.data.columns.disease_label
     sample_name_col = config.data.columns.sample_name
+    strategy = config.splitting.strategy
 
     # Get sample info
     sample_ids, labels, sample_names = get_sample_info_from_adata(
@@ -264,8 +267,13 @@ def run_loocv_for_hyperparams(
         sample_name_col=sample_name_col
     )
 
-    # Create splitter
-    splitter = LOOCVSplitter(random_seed=config.splitting.random_seed)
+    # Create splitter based on config
+    splitter = create_splitter(
+        strategy=strategy,
+        n_splits=config.splitting.n_splits,
+        n_repeats=config.splitting.n_repeats,
+        random_seed=config.splitting.random_seed
+    )
     n_folds = splitter.get_n_splits(sample_ids)
 
     all_results = []
@@ -329,7 +337,11 @@ def run_loocv_for_hyperparams(
             ratio_reg_lambda=disease_ratio_lambda
         )
 
-        # Train fold (skip_fold_metrics=True for LOOCV)
+        # Train fold
+        # For LOOCV (1 test sample), skip per-fold metrics
+        # For K-Fold (multiple test samples), compute per-fold metrics
+        skip_fold_metrics = (strategy == "loocv")
+
         result = trainer.train_fold(
             train_bag_dl=train_bag_dl,
             train_instance_dl=train_instance_dl,
@@ -339,8 +351,8 @@ def run_loocv_for_hyperparams(
             encoder_learning_rate=encoder_learning_rate,
             use_early_stopping=False,
             fold_idx=fold_idx,
-            test_sample_name=fold_info.test_sample_name or f"Sample_{fold_idx}",
-            skip_fold_metrics=True,  # LOOCV: skip per-fold metrics
+            test_sample_name=fold_info.test_sample_name or f"Fold_{fold_idx}",
+            skip_fold_metrics=skip_fold_metrics,
         )
 
         all_results.append(result)
@@ -352,16 +364,22 @@ def run_loocv_for_hyperparams(
                 'student': copy.deepcopy(model_student.state_dict()),
                 'encoder': copy.deepcopy(model_encoder.state_dict()),
                 'fold_idx': fold_idx,
-                'test_sample': fold_info.test_sample_name or f"Sample_{fold_idx}",
+                'test_sample': fold_info.test_sample_name or f"Fold_{fold_idx}",
             })
 
         if verbose:
-            # For LOOCV, show prediction instead of meaningless fold AUC
-            pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
-            true_label = "Disease" if result.y_true[0] == 1 else "Control"
-            correct = "✓" if pred_label == true_label else "✗"
-            print(f"  Fold {fold_idx + 1}/{n_folds}: prob={result.y_pred_proba[0]:.4f} "
-                  f"(pred={pred_label}, true={true_label}) {correct}")
+            if strategy == "loocv":
+                # For LOOCV, show prediction instead of meaningless fold AUC
+                pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
+                true_label = "Disease" if result.y_true[0] == 1 else "Control"
+                correct = "✓" if pred_label == true_label else "✗"
+                print(f"  Fold {fold_idx + 1}/{n_folds}: prob={result.y_pred_proba[0]:.4f} "
+                      f"(pred={pred_label}, true={true_label}) {correct}")
+            else:
+                # For K-Fold, show per-fold metrics
+                auc = result.metrics.get('auc', 0)
+                acc = result.metrics.get('accuracy', 0)
+                print(f"  Fold {fold_idx + 1}/{n_folds}: AUC={auc:.4f}, Acc={acc:.4f}")
 
     # Final cleanup after all folds
     del model_teacher, model_student, model_encoder
@@ -369,22 +387,43 @@ def run_loocv_for_hyperparams(
     gc.collect()
     torch.cuda.empty_cache()
 
-    # For LOOCV: concatenate all predictions and compute overall metrics
+    # Compute overall metrics based on CV strategy
     from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
 
     all_y_true = np.concatenate([r.y_true for r in all_results])
     all_y_pred_proba = np.concatenate([r.y_pred_proba for r in all_results])
     all_y_pred = (all_y_pred_proba >= 0.5).astype(int)
 
-    # Compute overall metrics (this is the correct way for LOOCV)
-    overall_metrics = {
-        'mean_auc': roc_auc_score(all_y_true, all_y_pred_proba),
-        'mean_accuracy': accuracy_score(all_y_true, all_y_pred),
-        'mean_f1_score': f1_score(all_y_true, all_y_pred, zero_division=0),
-        'std_auc': 0.0,  # No std for concatenated metrics
-        'std_accuracy': 0.0,
-        'std_f1_score': 0.0,
-    }
+    if strategy == "loocv":
+        # LOOCV: concatenate all predictions and compute overall metrics
+        overall_metrics = {
+            'mean_auc': roc_auc_score(all_y_true, all_y_pred_proba),
+            'mean_accuracy': accuracy_score(all_y_true, all_y_pred),
+            'mean_f1_score': f1_score(all_y_true, all_y_pred, zero_division=0),
+            'std_auc': 0.0,  # No std for concatenated metrics
+            'std_accuracy': 0.0,
+            'std_f1_score': 0.0,
+        }
+    else:
+        # K-Fold: calculate mean and std of per-fold metrics
+        fold_aucs = []
+        fold_accs = []
+        fold_f1s = []
+
+        for r in all_results:
+            if 'auc' in r.metrics:
+                fold_aucs.append(r.metrics['auc'])
+                fold_accs.append(r.metrics.get('accuracy', 0))
+                fold_f1s.append(r.metrics.get('f1_score', 0))
+
+        overall_metrics = {
+            'mean_auc': np.mean(fold_aucs) if fold_aucs else roc_auc_score(all_y_true, all_y_pred_proba),
+            'mean_accuracy': np.mean(fold_accs) if fold_accs else accuracy_score(all_y_true, all_y_pred),
+            'mean_f1_score': np.mean(fold_f1s) if fold_f1s else f1_score(all_y_true, all_y_pred, zero_division=0),
+            'std_auc': np.std(fold_aucs) if fold_aucs else 0.0,
+            'std_accuracy': np.std(fold_accs) if fold_accs else 0.0,
+            'std_f1_score': np.std(fold_f1s) if fold_f1s else 0.0,
+        }
 
     if return_models:
         return overall_metrics, fold_models
@@ -503,9 +542,10 @@ def main():
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create output directory
+    # Create output directory with strategy name
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(config.paths.output_root) / f"tuning_{timestamp}"
+    strategy = config.splitting.strategy
+    output_dir = Path(config.paths.output_root) / f"tuning_{strategy}_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
 
@@ -544,8 +584,13 @@ def main():
     n_combinations = len(param_grid)
 
     print(f"\n{'='*60}")
-    print(f"Grid Search Hyperparameter Tuning")
+    print(f"Grid Search Hyperparameter Tuning ({strategy.upper()})")
     print(f"{'='*60}")
+    print(f"CV Strategy: {strategy}")
+    if strategy != "loocv":
+        print(f"  - n_splits: {config.splitting.n_splits}")
+        if strategy == "repeated_stratified_kfold":
+            print(f"  - n_repeats: {config.splitting.n_repeats}")
     print(f"Search space:")
     print(f"  - learning_rate: {lr_values}")
     print(f"  - encoder_learning_rate: {enc_lr_values}")
@@ -585,7 +630,7 @@ def main():
         try:
             # return_models=True if we need to save models
             need_models = save_top_k > 0
-            result_data = run_loocv_for_hyperparams(
+            result_data = run_cv_for_hyperparams(
                 adata=adata,
                 config=config,
                 device=device,

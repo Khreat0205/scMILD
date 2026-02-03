@@ -1,28 +1,19 @@
 #!/usr/bin/env python
 """
-02_train_loocv.py - DEPRECATED: Use 02_train_cv.py instead
+02_train_cv.py - Cross-Validation 기반 MIL 학습 스크립트
 
-This script is deprecated and will be removed in a future version.
-Please use 02_train_cv.py which supports LOOCV, Stratified K-Fold, and Repeated K-Fold.
+LOOCV, Stratified K-Fold, Repeated Stratified K-Fold 등 다양한 CV 전략을 지원합니다.
 
 Usage:
     python scripts/02_train_cv.py --config config/skin3.yaml
     python scripts/02_train_cv.py --config config/scp1884.yaml --gpu 0
 """
 
-import warnings
-warnings.warn(
-    "02_train_loocv.py is deprecated. Use 02_train_cv.py instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
-
-# Legacy code below for backward compatibility
-
 import os
 import sys
 import argparse
 import gc
+import traceback
 from pathlib import Path
 from datetime import datetime
 
@@ -39,7 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.config import load_config, ScMILDConfig
 from src.data import (
     load_adata, load_adata_with_subset, preprocess_adata, print_adata_summary,
-    LOOCVSplitter, get_sample_info_from_adata, print_split_summary,
+    create_splitter, get_sample_info_from_adata, print_split_summary,
     MilDataset, InstanceDataset, collate_mil, create_instance_dataset_with_bag_labels
 )
 from src.models import (
@@ -190,8 +181,8 @@ def create_models(config: ScMILDConfig, device: torch.device, encoder_path: str)
         latent_dim=model_config['latent_dim'],
         device=device,
         hidden_layers=model_config['hidden_layers'],
-        n_studies=model_config['n_studies'],
-        study_emb_dim=model_config.get('study_emb_dim', 16),
+        n_studies=model_config.get('n_conditionals', model_config.get('n_studies')),
+        study_emb_dim=model_config.get('conditional_emb_dim', model_config.get('study_emb_dim', 16)),
         num_codes=model_config.get('num_codes', 1024),
     )
     encoder_model.load_state_dict(checkpoint['model_state_dict'])
@@ -232,8 +223,26 @@ def create_models(config: ScMILDConfig, device: torch.device, encoder_path: str)
     return model_teacher, model_student, model_encoder
 
 
+def save_partial_results(all_results: list, output_dir: Path):
+    """Save partial results (for error recovery)."""
+    if not all_results:
+        return
+
+    try:
+        # Save predictions so far
+        pred_df = pd.DataFrame({
+            'sample_name': [r.test_sample for r in all_results],
+            'y_true': np.concatenate([r.y_true for r in all_results]),
+            'y_pred_proba': np.concatenate([r.y_pred_proba for r in all_results]),
+        })
+        pred_df.to_csv(output_dir / "predictions_partial.csv", index=False)
+        print(f"Partial results saved to: {output_dir / 'predictions_partial.csv'}")
+    except Exception as e:
+        print(f"Failed to save partial results: {e}")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Train scMILD with LOOCV")
+    parser = argparse.ArgumentParser(description="Train scMILD with Cross-Validation")
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
     parser.add_argument("--gpu", type=int, default=0, help="GPU ID to use")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
@@ -249,9 +258,10 @@ def main():
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Create output directory
+    # Create output directory with strategy name
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(config.paths.output_root) / f"loocv_{timestamp}"
+    strategy = config.splitting.strategy
+    output_dir = Path(config.paths.output_root) / f"cv_{strategy}_{timestamp}"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output directory: {output_dir}")
 
@@ -286,14 +296,19 @@ def main():
         ))
         print(f"Using conditional embedding: {config.data.conditional_embedding.column} -> {embedding_col}")
 
-    # Create splitter
-    splitter = LOOCVSplitter(random_seed=config.splitting.random_seed)
+    # Create splitter based on config
+    splitter = create_splitter(
+        strategy=config.splitting.strategy,
+        n_splits=config.splitting.n_splits,
+        n_repeats=config.splitting.n_repeats,
+        random_seed=config.splitting.random_seed
+    )
     print_split_summary(splitter, sample_ids, labels, sample_names)
 
     # Initialize metrics logger
     metrics_logger = MetricsLogger(str(output_dir / "results.csv"))
 
-    # Run LOOCV
+    # Run CV
     all_results = []
     n_folds = splitter.get_n_splits(sample_ids)
 
@@ -306,146 +321,198 @@ def main():
     test_bag_dl = None
 
     print(f"\n{'='*60}")
-    print(f"Starting LOOCV Training ({n_folds} folds)")
+    print(f"Starting {strategy.upper()} Training ({n_folds} folds)")
     print(f"{'='*60}\n")
 
-    for fold_info in splitter.split(sample_ids, labels, sample_names):
-        fold_idx = fold_info.fold_idx
-        test_sample_name = fold_info.test_sample_name or f"Sample_{fold_info.test_samples[0]}"
+    try:
+        for fold_info in splitter.split(sample_ids, labels, sample_names):
+            fold_idx = fold_info.fold_idx
+            test_sample_name = fold_info.test_sample_name or f"Fold_{fold_idx}"
 
-        # Clean up previous fold's GPU memory
-        if fold_idx > 0:
-            del model_teacher, model_student, model_encoder
-            del train_bag_dl, train_instance_dl, test_bag_dl
-            gc.collect()
-            torch.cuda.empty_cache()
+            # Clean up previous fold's GPU memory
+            if fold_idx > 0:
+                del model_teacher, model_student, model_encoder
+                del train_bag_dl, train_instance_dl, test_bag_dl
+                gc.collect()
+                torch.cuda.empty_cache()
 
-        print(f"\n[Fold {fold_idx + 1}/{n_folds}] Test sample: {test_sample_name}")
-        print("-" * 40)
+            print(f"\n[Fold {fold_idx + 1}/{n_folds}] Test: {test_sample_name}")
+            print("-" * 40)
 
-        # Create fresh models for each fold
-        model_teacher, model_student, model_encoder = create_models(
-            config, device, config.paths.pretrained_encoder
-        )
-
-        # Create dataloaders
-        train_bag_dl, train_instance_dl, test_bag_dl = create_dataloaders(
-            adata,
-            fold_info.train_samples,
-            fold_info.test_samples,
-            device,
-            config,
-            embedding_mapping
-        )
-
-        # Calculate disease ratio if enabled (only once per fold)
-        disease_ratio = None
-        ratio_reg_lambda = 0.0
-
-        if config.mil.loss.disease_ratio_reg.enabled:
-            print("  Calculating disease ratio from training data...")
-            disease_ratio = calculate_disease_ratio_from_dataloader(
-                train_instance_dl,
-                model_encoder,
-                device,
-                alpha=config.mil.loss.disease_ratio_reg.alpha,
-                beta=config.mil.loss.disease_ratio_reg.beta,
-                use_conditional=True
+            # Create fresh models for each fold
+            model_teacher, model_student, model_encoder = create_models(
+                config, device, config.paths.pretrained_encoder
             )
-            ratio_reg_lambda = config.mil.loss.disease_ratio_reg.lambda_weight
 
-            if disease_ratio is not None and fold_idx == 0:
-                print_disease_ratio_summary(disease_ratio, top_k=5)
+            # Create dataloaders
+            train_bag_dl, train_instance_dl, test_bag_dl = create_dataloaders(
+                adata,
+                fold_info.train_samples,
+                fold_info.test_samples,
+                device,
+                config,
+                embedding_mapping
+            )
 
-        # Create trainer
-        trainer = MILTrainer(
-            model_teacher=model_teacher,
-            model_student=model_student,
-            model_encoder=model_encoder,
-            device=device,
-            use_conditional_ae=True,
-            student_optimize_period=config.mil.student.optimize_period,
-            student_loss_weight_neg=config.mil.loss.negative_weight,
-            disease_ratio=disease_ratio,
-            ratio_reg_lambda=ratio_reg_lambda
-        )
+            # Calculate disease ratio if enabled (only once per fold)
+            disease_ratio = None
+            ratio_reg_lambda = 0.0
 
-        # Train fold (skip_fold_metrics=True for LOOCV)
-        result = trainer.train_fold(
-            train_bag_dl=train_bag_dl,
-            train_instance_dl=train_instance_dl,
-            test_bag_dl=test_bag_dl,
-            n_epochs=config.mil.training.epochs,
-            learning_rate=config.mil.training.learning_rate,
-            encoder_learning_rate=config.mil.training.encoder_learning_rate,
-            use_early_stopping=config.mil.training.use_early_stopping,
-            patience=config.mil.training.patience,
-            fold_idx=fold_idx,
-            test_sample_name=test_sample_name,
-            skip_fold_metrics=True,  # LOOCV: skip per-fold metrics
-        )
+            if config.mil.loss.disease_ratio_reg.enabled:
+                print("  Calculating disease ratio from training data...")
+                disease_ratio = calculate_disease_ratio_from_dataloader(
+                    train_instance_dl,
+                    model_encoder,
+                    device,
+                    alpha=config.mil.loss.disease_ratio_reg.alpha,
+                    beta=config.mil.loss.disease_ratio_reg.beta,
+                    use_conditional=True
+                )
+                ratio_reg_lambda = config.mil.loss.disease_ratio_reg.lambda_weight
 
-        all_results.append(result)
+                if disease_ratio is not None and fold_idx == 0:
+                    print_disease_ratio_summary(disease_ratio, top_k=5)
 
-        # Print fold result (for LOOCV: show prediction instead of metrics)
-        pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
-        true_label = "Disease" if result.y_true[0] == 1 else "Control"
-        correct = "✓" if pred_label == true_label else "✗"
-        print(f"  prob={result.y_pred_proba[0]:.4f} (pred={pred_label}, true={true_label}) {correct}")
+            # Create trainer
+            trainer = MILTrainer(
+                model_teacher=model_teacher,
+                model_student=model_student,
+                model_encoder=model_encoder,
+                device=device,
+                use_conditional_ae=True,
+                student_optimize_period=config.mil.student.optimize_period,
+                student_loss_weight_neg=config.mil.loss.negative_weight,
+                disease_ratio=disease_ratio,
+                ratio_reg_lambda=ratio_reg_lambda
+            )
 
-        # Save fold model
-        if config.logging.save_checkpoints:
-            trainer.save_models(str(output_dir / "models"), fold_idx)
+            # Train fold
+            # For LOOCV (1 test sample), skip per-fold metrics
+            # For K-Fold (multiple test samples), compute per-fold metrics
+            skip_fold_metrics = (strategy == "loocv")
 
-    # Final cleanup after all folds
-    del model_teacher, model_student, model_encoder
-    del train_bag_dl, train_instance_dl, test_bag_dl
-    gc.collect()
-    torch.cuda.empty_cache()
+            result = trainer.train_fold(
+                train_bag_dl=train_bag_dl,
+                train_instance_dl=train_instance_dl,
+                test_bag_dl=test_bag_dl,
+                n_epochs=config.mil.training.epochs,
+                learning_rate=config.mil.training.learning_rate,
+                encoder_learning_rate=config.mil.training.encoder_learning_rate,
+                use_early_stopping=config.mil.training.use_early_stopping,
+                patience=config.mil.training.patience,
+                fold_idx=fold_idx,
+                test_sample_name=test_sample_name,
+                skip_fold_metrics=skip_fold_metrics,
+            )
+
+            all_results.append(result)
+
+            # Print fold result
+            if strategy == "loocv":
+                # For LOOCV: show prediction instead of metrics
+                pred_label = "Disease" if result.y_pred_proba[0] >= 0.5 else "Control"
+                true_label = "Disease" if result.y_true[0] == 1 else "Control"
+                correct = "✓" if pred_label == true_label else "✗"
+                print(f"  prob={result.y_pred_proba[0]:.4f} (pred={pred_label}, true={true_label}) {correct}")
+            else:
+                # For K-Fold: show per-fold metrics
+                print(f"  AUC={result.metrics.get('auc', 0):.4f}, Acc={result.metrics.get('accuracy', 0):.4f}")
+
+            # Save fold model
+            if config.logging.save_checkpoints:
+                trainer.save_models(str(output_dir / "models"), fold_idx)
+
+    except Exception as e:
+        print(f"\n{'='*60}")
+        print(f"ERROR during training: {e}")
+        print(f"{'='*60}")
+        traceback.print_exc()
+        save_partial_results(all_results, output_dir)
+        raise
+
+    finally:
+        # Final cleanup after all folds
+        if model_teacher is not None:
+            del model_teacher, model_student, model_encoder
+        if train_bag_dl is not None:
+            del train_bag_dl, train_instance_dl, test_bag_dl
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # Save final results
     metrics_logger.save()
+    print(f"Metrics saved to {output_dir / 'results.csv'}")
 
-    # Calculate overall AUROC by concatenating all fold predictions
+    # Calculate overall metrics
     all_y_true = np.concatenate([r.y_true for r in all_results])
     all_y_pred_proba = np.concatenate([r.y_pred_proba for r in all_results])
 
-    # Import metrics functions
     from sklearn.metrics import roc_auc_score, accuracy_score, f1_score
-
-    # Calculate overall metrics
-    overall_auc = roc_auc_score(all_y_true, all_y_pred_proba)
-
-    # Find optimal threshold on concatenated predictions
     from src.training.metrics import find_optimal_threshold
-    optimal_threshold, _ = find_optimal_threshold(all_y_true, all_y_pred_proba)
-    all_y_pred = (all_y_pred_proba >= optimal_threshold).astype(int)
 
-    overall_acc = accuracy_score(all_y_true, all_y_pred)
-    overall_f1 = f1_score(all_y_true, all_y_pred, zero_division=0)
+    # Different metric calculation based on strategy
+    if strategy == "loocv":
+        # LOOCV: Calculate overall metrics by concatenating all fold predictions
+        overall_auc = roc_auc_score(all_y_true, all_y_pred_proba)
+        optimal_threshold, _ = find_optimal_threshold(all_y_true, all_y_pred_proba)
+        all_y_pred = (all_y_pred_proba >= optimal_threshold).astype(int)
+        overall_acc = accuracy_score(all_y_true, all_y_pred)
+        overall_f1 = f1_score(all_y_true, all_y_pred, zero_division=0)
+
+        std_auc = 0.0  # No std for LOOCV
+        std_acc = 0.0
+        std_f1 = 0.0
+    else:
+        # K-Fold: Calculate mean and std of per-fold metrics
+        fold_aucs = []
+        fold_accs = []
+        fold_f1s = []
+
+        for r in all_results:
+            if 'auc' in r.metrics:
+                fold_aucs.append(r.metrics['auc'])
+                fold_accs.append(r.metrics.get('accuracy', 0))
+                fold_f1s.append(r.metrics.get('f1_score', 0))
+
+        overall_auc = np.mean(fold_aucs) if fold_aucs else 0
+        overall_acc = np.mean(fold_accs) if fold_accs else 0
+        overall_f1 = np.mean(fold_f1s) if fold_f1s else 0
+
+        std_auc = np.std(fold_aucs) if fold_aucs else 0
+        std_acc = np.std(fold_accs) if fold_accs else 0
+        std_f1 = np.std(fold_f1s) if fold_f1s else 0
+
+        # Also find optimal threshold on all predictions
+        optimal_threshold, _ = find_optimal_threshold(all_y_true, all_y_pred_proba)
+        all_y_pred = (all_y_pred_proba >= optimal_threshold).astype(int)
 
     # Print summary
     print(f"\n{'='*60}")
-    print("LOOCV Results Summary")
+    print(f"{strategy.upper()} Results Summary")
     print(f"{'='*60}")
 
-    # Overall metrics (concatenated predictions - proper LOOCV evaluation)
-    print(f"\n[Overall Metrics - Concatenated Predictions]")
-    print(f"AUC:      {overall_auc:.4f}")
-    print(f"Accuracy: {overall_acc:.4f}")
-    print(f"F1 Score: {overall_f1:.4f}")
-    print(f"Optimal Threshold: {optimal_threshold:.4f}")
-
-    # Per-fold metrics (for reference)
-    accs = [r.metrics['accuracy'] for r in all_results]
-    print(f"\n[Per-Fold Accuracy]")
-    print(f"Mean:     {np.mean(accs):.4f} ± {np.std(accs):.4f}")
+    print(f"\n[Overall Metrics]")
+    if strategy == "loocv":
+        print(f"AUC:      {overall_auc:.4f}")
+        print(f"Accuracy: {overall_acc:.4f}")
+        print(f"F1 Score: {overall_f1:.4f}")
+        print(f"Optimal Threshold: {optimal_threshold:.4f}")
+    else:
+        print(f"AUC:      {overall_auc:.4f} ± {std_auc:.4f}")
+        print(f"Accuracy: {overall_acc:.4f} ± {std_acc:.4f}")
+        print(f"F1 Score: {overall_f1:.4f} ± {std_f1:.4f}")
+        print(f"Optimal Threshold: {optimal_threshold:.4f}")
 
     # Save overall metrics to a separate file
     overall_results = {
+        'strategy': strategy,
+        'n_folds': n_folds,
         'overall_auc': overall_auc,
+        'std_auc': std_auc,
         'overall_accuracy': overall_acc,
+        'std_accuracy': std_acc,
         'overall_f1': overall_f1,
+        'std_f1': std_f1,
         'optimal_threshold': optimal_threshold,
         'n_samples': len(all_y_true),
         'n_positive': int(all_y_true.sum()),
@@ -455,7 +522,7 @@ def main():
 
     # Save concatenated predictions for further analysis
     pred_df = pd.DataFrame({
-        'sample_name': [r.test_sample for r in all_results],
+        'sample_name': [r.test_sample for r in all_results for _ in r.y_true],
         'y_true': all_y_true,
         'y_pred_proba': all_y_pred_proba,
         'y_pred': all_y_pred,
@@ -463,6 +530,9 @@ def main():
     pred_df.to_csv(output_dir / "predictions.csv", index=False)
 
     print(f"\nResults saved to: {output_dir}")
+    print(f"  - overall_results.csv")
+    print(f"  - predictions.csv")
+    print(f"  - results.csv")
 
 
 if __name__ == "__main__":

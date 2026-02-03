@@ -81,7 +81,7 @@ encoder:
   # 아키텍처
   latent_dim: 128
   num_codes: 512
-  study_emb_dim: 1 
+  conditional_emb_dim: 1  # Organ embedding dimension
   hidden_layers: [512, 256, 128]
   # 학습 설정 (pretrain용)
   pretrain:
@@ -177,8 +177,6 @@ hardware:
 # 하이퍼파라미터 튜닝 설정
 # ============================================================================
 tuning:
-  enabled: false
-
   # Search space (Grid Search)
   # Transfer learning 개념이므로 작은 epoch 사용 권장
   learning_rate: [0.001]

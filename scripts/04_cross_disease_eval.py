@@ -55,8 +55,8 @@ def load_trained_models(model_dir: str, device: torch.device, config: ScMILDConf
         latent_dim=model_config['latent_dim'],
         device=device,
         hidden_layers=model_config['hidden_layers'],
-        n_studies=model_config['n_studies'],
-        study_emb_dim=model_config.get('study_emb_dim', 16),
+        n_conditionals=model_config.get('n_conditionals', model_config.get('n_studies')),
+        conditional_emb_dim=model_config.get('conditional_emb_dim', model_config.get('study_emb_dim', 16)),
         num_codes=model_config.get('num_codes', 1024),
     )
     encoder_model.load_state_dict(checkpoint['model_state_dict'])

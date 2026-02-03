@@ -97,32 +97,42 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
 
 - `config.paths.pretrained_encoder`: Pretrained encoder 경로
 - `config.data.conditional_embedding`: Conditional 임베딩 설정 (column, encoded_column, mapping_path)
-- `config.encoder`: latent_dim, num_codes, study_emb_dim, pretrain.*
+- `config.encoder`: latent_dim, num_codes, conditional_emb_dim, pretrain.*
 - `config.mil.training`: learning_rate, encoder_learning_rate, epochs
 - `config.tuning`: Grid search 설정
+- `config.splitting`: strategy (loocv, stratified_kfold, repeated_stratified_kfold), n_splits, n_repeats
 
 ## 개발 시 주의사항
 
-1. **Pretrain 후 매핑 파일 복사 필수**: `{column}_mapping.json`이 없으면 MIL 학습 시 경고 발생
-2. **LOOCV 평가**: fold별 AUC는 무의미, `overall_results.csv`의 전체 AUROC 사용
+1. **Pretrain 후 `--register` 플래그 사용**: 자동으로 pretrained 디렉토리에 등록
+2. **LOOCV/K-Fold 평가**: `02_train_cv.py` 사용, strategy에 따라 메트릭 계산 방식이 다름
 3. **Config 수정 시**: `src/config.py`의 dataclass와 `_dict_to_config()` 함수 모두 수정
 4. **스크립트에서 "study" 하드코딩 금지**: `config.data.conditional_embedding.column` 사용
-5. **GPU 메모리**: LOOCV fold 간 `gc.collect()`, `torch.cuda.empty_cache()` 자동 호출
+5. **GPU 메모리**: CV fold 간 `gc.collect()`, `torch.cuda.empty_cache()` 자동 호출
+6. **변수명 범용화**: `study_emb_dim` → `conditional_emb_dim`, `n_studies` → `n_conditionals` (하위 호환성 유지)
 
 ## 트러블슈팅
 
 - **Import 에러**: `sys.path.insert(0, str(Path(__file__).parent.parent))`
 - **CUDA OOM**: `config.mil.subsampling.enabled: true` 또는 batch_size 감소
-- **Mapping 경고**: pretrain 후 생성된 `{column}_mapping.json`을 config 경로에 복사
+- **Mapping 경고**: pretrain 후 생성된 `{column}_mapping.json`을 config 경로에 복사 (또는 `--register` 사용)
 - **Pretrain NaN 발생** (`num_codes` 증가 시):
   - 원인: Dead code revival 로직이 대량의 코드를 동시에 재초기화 → codebook 불안정
   - 해결: `encoder.pretrain.batch_size` 증가 (512→2048 권장) 또는 dead code revival 비활성화
+  - 해결: Stratified sampling 사용 (자동 활성화됨)
 
 ## 변경 이력
 
 상세 변경 이력은 `docs/session_log_*.md` 참조
 
-### 최근 주요 변경 (2026-02-02)
+### 최근 주요 변경 (2026-02-03)
+- `02_train_loocv.py` → `02_train_cv.py` 일반화: LOOCV, Stratified K-Fold, Repeated K-Fold 지원
+- Pretrain 자동 배치: `--register` 플래그 추가
+- K-means Codebook 초기화: Stratified sampling 지원 (conditional 변수 기준)
+- 변수명 범용화: `study_*` → `conditional_*` (하위 호환성 유지)
+- `tuning.enabled` 필드 제거 (불필요)
+
+### 이전 변경 (2026-02-02)
 - Gradient clipping 추가 (`trainer_ae.py`): `max_norm=1.0`
 - NaN 발생 원인 분석: `num_codes` 증가 시 dead code revival 로직 불안정
 - 해결 방안 정리: batch size 증가, dead code revival 완화 등
@@ -136,4 +146,3 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
 ## TODO
 - [ ] `05_cell_scoring.py`: `--loocv_dir` 옵션으로 LOOCV 모드 지원
 - [ ] Pretrain: `num_codes` 증가 시 NaN 방지 (batch size 증가 또는 dead code revival 개선)
-- [ ] K-means 초기화: conditional column 기준 stratified sampling 지원

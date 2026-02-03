@@ -24,3 +24,4 @@ run_scMILD_*
 # *.ipynb
 *.log
 !requirements.txt
+PLAN.md

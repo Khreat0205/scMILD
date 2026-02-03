@@ -94,9 +94,17 @@ class EncoderConfig:
     type: str = "VQ_AENB_Conditional"
     latent_dim: int = 128
     num_codes: int = 1024
-    study_emb_dim: int = 16  # Conditional embedding dimension
+    conditional_emb_dim: int = 16  # Conditional embedding dimension
     hidden_layers: List[int] = field(default_factory=lambda: [512, 256, 128])  # Encoder/Decoder hidden layers
     pretrain: EncoderPretrainConfig = field(default_factory=EncoderPretrainConfig)
+
+    # Deprecated alias (for backward compatibility)
+    study_emb_dim: Optional[int] = None
+
+    def __post_init__(self):
+        # Backward compatibility: if study_emb_dim is explicitly set, use it
+        if self.study_emb_dim is not None:
+            self.conditional_emb_dim = self.study_emb_dim
 
 
 @dataclass
@@ -184,7 +192,6 @@ class HardwareConfig:
 @dataclass
 class TuningConfig:
     """하이퍼파라미터 튜닝 설정"""
-    enabled: bool = False
     # Search space
     learning_rate: List[float] = field(default_factory=lambda: [0.0001])
     encoder_learning_rate: List[float] = field(default_factory=lambda: [0.0005])
@@ -368,11 +375,14 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
     # Encoder config (nested)
     encoder_dict = d.get("encoder", {})
     pretrain = _make_dataclass(EncoderPretrainConfig, encoder_dict.get("pretrain"))
+    # Support both new (conditional_emb_dim) and old (study_emb_dim) config keys
+    conditional_emb_dim = encoder_dict.get("conditional_emb_dim",
+                                           encoder_dict.get("study_emb_dim", 16))
     encoder = EncoderConfig(
         type=encoder_dict.get("type", "VQ_AENB_Conditional"),
         latent_dim=encoder_dict.get("latent_dim", 128),
         num_codes=encoder_dict.get("num_codes", 1024),
-        study_emb_dim=encoder_dict.get("study_emb_dim", 16),
+        conditional_emb_dim=conditional_emb_dim,
         hidden_layers=encoder_dict.get("hidden_layers", [512, 256, 128]),
         pretrain=pretrain,
     )
