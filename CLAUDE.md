@@ -125,7 +125,16 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
 
 상세 변경 이력은 `docs/session_log_*.md` 참조
 
-### 최근 주요 변경 (2026-02-03)
+### 최근 주요 변경 (2026-02-04)
+- `05_cell_scoring.py` 대폭 확장:
+  - 3가지 모드 지원: `--model_dir` (final), `--cv_dir` (CV), `--tuning_dir` (tuning)
+  - CV 모드: 각 fold 모델로 해당 test sample만 scoring, fold 정보 포함
+  - h5ad 출력 지원 (`scored_adata.h5ad`, `codebook_adata.h5ad`)
+  - Cell-level: `vq_code`, `X_pretrained`, `X_scmild` 추가
+  - Codebook-level: `attn_direct` (codebook 직접 통과), `attn_cell_*` (cell 기반 통계)
+  - CV 모드 fold별 attention 통계 지원
+
+### 이전 변경 (2026-02-03)
 - `02_train_loocv.py` → `02_train_cv.py` 일반화: LOOCV, Stratified K-Fold, Repeated K-Fold 지원
 - Pretrain 자동 배치: `--register` 플래그 추가
 - K-means Codebook 초기화: Stratified sampling 지원 (conditional 변수 기준)
@@ -144,5 +153,5 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
 - Config: `EncoderConfig.study_emb_dim` 필드 추가
 
 ## TODO
-- [ ] `05_cell_scoring.py`: `--loocv_dir` 옵션으로 LOOCV 모드 지원
+- [x] `05_cell_scoring.py`: CV/Tuning 모드 지원 (완료)
 - [ ] Pretrain: `num_codes` 증가 시 NaN 방지 (batch size 증가 또는 dead code revival 개선)
