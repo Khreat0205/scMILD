@@ -566,7 +566,8 @@ def add_scores_to_adata(
 
     # Add obs columns
     adata.obs['attention_score_raw'] = results_df['attention_score_raw'].values
-    adata.obs['attention_score_norm'] = results_df['attention_score_norm'].values
+    adata.obs['attention_score_global'] = results_df['attention_score_global'].values
+    adata.obs['attention_score_sample'] = results_df['attention_score_sample'].values
     adata.obs['student_prediction'] = results_df['student_prediction'].values
     adata.obs['vq_code'] = results_df['vq_code'].values.astype(int)
 
