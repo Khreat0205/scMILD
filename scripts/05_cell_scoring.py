@@ -324,11 +324,21 @@ def compute_codebook_direct_attention(
     return attn_direct.squeeze().cpu().numpy()
 
 
+def normalize_attention_global(attention_scores: np.ndarray) -> np.ndarray:
+    """Normalize attention scores globally (min-max across all cells)."""
+    score_min = attention_scores.min()
+    score_max = attention_scores.max()
+    if score_max - score_min > 1e-8:
+        return (attention_scores - score_min) / (score_max - score_min)
+    else:
+        return np.full_like(attention_scores, 0.5)
+
+
 def normalize_attention_per_sample(
     attention_scores: np.ndarray,
     sample_ids: np.ndarray
 ) -> np.ndarray:
-    """Normalize attention scores per sample (min-max)."""
+    """Normalize attention scores per sample (min-max within each sample)."""
     attention_scores_norm = np.zeros_like(attention_scores)
     unique_samples = np.unique(sample_ids)
 
@@ -421,9 +431,10 @@ def compute_cell_scores_for_adata(
     attention_scores_raw = np.concatenate(all_results['attention_score_raw'])
     student_predictions = np.concatenate(all_results['student_prediction'])
 
-    # Normalize attention scores per sample
+    # Normalize attention scores
     sample_ids = adata.obs[sample_col].values
-    attention_scores_norm = normalize_attention_per_sample(attention_scores_raw, sample_ids)
+    attention_scores_global = normalize_attention_global(attention_scores_raw)
+    attention_scores_sample = normalize_attention_per_sample(attention_scores_raw, sample_ids)
 
     # Create results DataFrame
     results_df = pd.DataFrame({
@@ -432,7 +443,8 @@ def compute_cell_scores_for_adata(
         'sample_name': adata.obs[sample_name_col].values,
         'disease_label': adata.obs[label_col].values,
         'attention_score_raw': attention_scores_raw,
-        'attention_score_norm': attention_scores_norm,
+        'attention_score_global': attention_scores_global,  # 전체 기준 정규화
+        'attention_score_sample': attention_scores_sample,  # sample 내 정규화
         'student_prediction': student_predictions,
         'vq_code': vq_codes,
     })
@@ -510,7 +522,8 @@ def create_codebook_adata(
 
         if n_cells > 0:
             cells = cell_results_df[mask]
-            scores = cells['attention_score_norm']
+            # Use global normalized scores for codebook statistics
+            scores = cells['attention_score_global']
 
             adata_codebook.obs.loc[code_name, 'n_samples'] = cells['sample_id'].nunique()
             adata_codebook.obs.loc[code_name, 'disease_ratio'] = cells['disease_label'].mean()
@@ -525,7 +538,7 @@ def create_codebook_adata(
                 for fold_idx in cells['fold'].unique():
                     fold_mask = cells['fold'] == fold_idx
                     if fold_mask.sum() > 0:
-                        fold_scores = cells.loc[fold_mask, 'attention_score_norm']
+                        fold_scores = cells.loc[fold_mask, 'attention_score_global']
                         adata_codebook.obs.loc[code_name, f'attn_cell_mean_fold{fold_idx}'] = fold_scores.mean()
                         adata_codebook.obs.loc[code_name, f'attn_cell_std_fold{fold_idx}'] = fold_scores.std()
 
