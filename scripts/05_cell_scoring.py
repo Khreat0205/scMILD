@@ -146,6 +146,63 @@ def get_fold_model_paths(model_dir: Path) -> List[int]:
     return sorted(fold_indices)
 
 
+def load_trained_models_tuning(
+    fold_dir: Path,
+    device: torch.device,
+    config: ScMILDConfig
+) -> Tuple:
+    """Load trained models from tuning fold directory.
+
+    Tuning saves models as: fold_dir/encoder.pth, teacher.pth, student.pth
+    These are state_dict only (not full model).
+    """
+
+    # Load pretrained encoder
+    encoder_model, model_config = load_pretrained_encoder(config, device)
+
+    # Wrap encoder
+    model_encoder = VQEncoderWrapperConditional(
+        encoder_model,
+        use_projection=config.mil.use_projection,
+        projection_dim=config.mil.projection_dim
+    )
+    model_encoder.to(device)
+
+    # Load encoder wrapper state
+    encoder_state = torch.load(fold_dir / "encoder.pth", map_location=device)
+    model_encoder.load_state_dict(encoder_state)
+
+    # Create and load teacher
+    input_dim = model_encoder.input_dims
+    attention_module = GatedAttentionModule(
+        L=input_dim,
+        D=config.mil.attention_dim,
+        K=1
+    ).to(device)
+
+    model_teacher = TeacherBranch(
+        input_dims=input_dim,
+        latent_dims=config.mil.latent_dim,
+        attention_module=attention_module,
+        num_classes=config.mil.num_classes
+    ).to(device)
+
+    teacher_state = torch.load(fold_dir / "teacher.pth", map_location=device)
+    model_teacher.load_state_dict(teacher_state)
+
+    # Create and load student
+    model_student = StudentBranch(
+        input_dims=input_dim,
+        latent_dims=config.mil.latent_dim,
+        num_classes=config.mil.num_classes
+    ).to(device)
+
+    student_state = torch.load(fold_dir / "student.pth", map_location=device)
+    model_student.load_state_dict(student_state)
+
+    return model_teacher, model_student, model_encoder
+
+
 # ============================================================================
 # Data Preparation Functions
 # ============================================================================
@@ -676,27 +733,140 @@ def process_tuning_mode(
     print("\n[Mode: Tuning]")
     print(f"Tuning directory: {tuning_dir}")
 
+    # Find best config from tuning_results.csv
+    tuning_results_path = tuning_dir / "tuning_results.csv"
+    if not tuning_results_path.exists():
+        raise FileNotFoundError(f"tuning_results.csv not found in {tuning_dir}")
+
+    tuning_df = pd.read_csv(tuning_results_path)
+    best_idx = tuning_df['mean_auc'].idxmax()
+    best_config_id = int(tuning_df.loc[best_idx, 'config_id'])
+    best_auc = tuning_df.loc[best_idx, 'mean_auc']
+    print(f"Best config: config_{best_config_id:03d} (AUC={best_auc:.4f})")
+
     # Find best model directory
-    # Tuning saves top-k models in subdirectories like "rank1_lr0.0001_..."
-    best_model_dirs = sorted(tuning_dir.glob("rank1_*"))
+    best_config_dir = tuning_dir / "models" / f"config_{best_config_id:03d}"
+    if not best_config_dir.exists():
+        raise FileNotFoundError(f"Best config directory not found: {best_config_dir}")
 
-    if best_model_dirs:
-        best_model_dir = best_model_dirs[0] / "models"
-        print(f"Using best model from: {best_model_dir}")
-    else:
-        # Fallback to models directory
-        best_model_dir = tuning_dir / "models"
-        print(f"Using models from: {best_model_dir}")
+    # Get fold directories
+    fold_dirs = sorted(best_config_dir.glob("fold_*"))
+    n_folds = len(fold_dirs)
+    print(f"Found {n_folds} folds in best config")
 
-    if not best_model_dir.exists():
-        raise FileNotFoundError(f"Models directory not found: {best_model_dir}")
+    # Recreate sample -> fold mapping using the same splitter
+    # (Tuning used the same splitter config, so we regenerate the same splits)
+    from src.data import create_splitter, get_sample_info_from_adata
 
-    # Use CV mode logic with the best model directory
-    # Create a pseudo cv_dir structure
-    return process_cv_mode(
-        tuning_dir,  # Should have predictions.csv
-        adata, config, device, batch_size
+    sample_col = config.data.columns.sample_id
+    label_col = config.data.columns.disease_label
+    sample_name_col = config.data.columns.sample_name
+
+    sample_ids, labels, sample_names = get_sample_info_from_adata(
+        adata,
+        sample_col=sample_col,
+        label_col=label_col,
+        sample_name_col=sample_name_col
     )
+
+    splitter = create_splitter(
+        strategy=config.splitting.strategy,
+        n_splits=config.splitting.n_splits,
+        n_repeats=config.splitting.n_repeats,
+        random_seed=config.splitting.random_seed
+    )
+
+    # Build sample_name -> fold mapping
+    # fold_info.test_samples contains sample_ids, need to map to sample_names
+    sample_id_to_name = dict(zip(sample_ids, sample_names))
+    sample_to_fold = {}
+    for fold_info in splitter.split(sample_ids, labels, sample_names):
+        fold_idx = fold_info.fold_idx
+        for sample_id in fold_info.test_samples:
+            sample_name = sample_id_to_name[sample_id]
+            sample_to_fold[sample_name] = fold_idx
+
+    print(f"Recreated sample-fold mapping: {len(sample_to_fold)} samples")
+
+    # Process each fold
+    all_results = []
+    all_X_pretrained = []
+    all_X_scmild = []
+    all_cell_indices = []
+    attn_direct_folds = {}
+    codebook = None
+
+    for fold_idx in range(n_folds):
+        fold_dir = best_config_dir / f"fold_{fold_idx:02d}"
+        if not fold_dir.exists():
+            print(f"  Fold {fold_idx} directory not found, skipping...")
+            continue
+
+        print(f"\n--- Fold {fold_idx} ---")
+
+        # Get samples for this fold
+        fold_samples = [s for s, f in sample_to_fold.items() if f == fold_idx]
+        print(f"  Test samples: {fold_samples}")
+
+        # Filter adata for this fold's samples
+        fold_mask = adata.obs[sample_name_col].isin(fold_samples)
+        fold_adata = adata[fold_mask].copy()
+
+        if fold_adata.n_obs == 0:
+            print(f"  No cells for fold {fold_idx}, skipping...")
+            continue
+
+        print(f"  Cells: {fold_adata.n_obs}")
+
+        # Load models for this fold (tuning format)
+        model_teacher, model_student, model_encoder = load_trained_models_tuning(
+            fold_dir, device, config
+        )
+
+        # Compute cell scores
+        results_df, X_pretrained, X_scmild, vq_codes = compute_cell_scores_for_adata(
+            fold_adata, model_teacher, model_student, model_encoder,
+            device, config, batch_size, fold_idx=fold_idx
+        )
+
+        # Compute codebook direct attention for this fold
+        attn_direct_fold = compute_codebook_direct_attention(model_encoder, model_teacher, device)
+        attn_direct_folds[fold_idx] = attn_direct_fold
+
+        # Store codebook (same for all folds - from pretrained encoder)
+        if codebook is None:
+            codebook = model_encoder.vq_model.quantizer.get_codebook().cpu().numpy()
+
+        # Store results
+        all_results.append(results_df)
+        all_X_pretrained.append(X_pretrained)
+        all_X_scmild.append(X_scmild)
+        all_cell_indices.extend(fold_adata.obs.index.tolist())
+
+        # Clean up
+        del model_teacher, model_student, model_encoder
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    # Merge results from all folds
+    print("\nMerging results from all folds...")
+    merged_results_df = pd.concat(all_results, ignore_index=True)
+    merged_X_pretrained = np.concatenate(all_X_pretrained, axis=0)
+    merged_X_scmild = np.concatenate(all_X_scmild, axis=0)
+
+    # Reorder to match original adata order
+    cell_order_map = {cell_id: idx for idx, cell_id in enumerate(all_cell_indices)}
+    original_order = [cell_order_map[cell_id] for cell_id in adata.obs.index]
+
+    merged_results_df = merged_results_df.iloc[original_order].reset_index(drop=True)
+    merged_results_df['cell_id'] = adata.obs.index.tolist()
+    merged_X_pretrained = merged_X_pretrained[original_order]
+    merged_X_scmild = merged_X_scmild[original_order]
+
+    # Average attn_direct across folds for overall score
+    attn_direct = np.mean(list(attn_direct_folds.values()), axis=0)
+
+    return merged_results_df, merged_X_pretrained, merged_X_scmild, codebook, attn_direct, attn_direct_folds
 
 
 # ============================================================================
