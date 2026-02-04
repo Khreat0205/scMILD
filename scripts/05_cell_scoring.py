@@ -1016,8 +1016,8 @@ def main():
     print(f"{'='*60}")
 
     # Summary by sample
-    sample_summary = results_df.groupby(['sample_name', 'disease_label']).agg({
-        'attention_score_norm': ['mean', 'std', 'max'],
+    sample_summary = results_df.groupby(['sample_name', 'disease_label'], observed=True).agg({
+        'attention_score_global': ['mean', 'std', 'max'],
         'student_prediction': ['mean', 'std'],
         'cell_id': 'count'
     }).round(4)
