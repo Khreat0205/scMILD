@@ -395,17 +395,15 @@ def create_codebook_adata(
     cell_results_df: pd.DataFrame,
     attn_direct: np.ndarray,
     attn_direct_folds: Optional[Dict[int, np.ndarray]] = None,
-    label_col: str = 'disease_label'
 ) -> sc.AnnData:
     """
     Create codebook AnnData with statistics.
 
     Args:
         codebook: Codebook embeddings (num_codes, latent_dim)
-        cell_results_df: Cell-level results DataFrame
+        cell_results_df: Cell-level results DataFrame (must have 'disease_label' column)
         attn_direct: Direct attention scores from codebook
         attn_direct_folds: Dict of fold_idx -> attention scores (CV mode)
-        label_col: Disease label column name
 
     Returns:
         AnnData for codebook
@@ -458,7 +456,7 @@ def create_codebook_adata(
             scores = cells['attention_score_norm']
 
             adata_codebook.obs.loc[code_name, 'n_samples'] = cells['sample_id'].nunique()
-            adata_codebook.obs.loc[code_name, 'disease_ratio'] = cells[label_col].mean()
+            adata_codebook.obs.loc[code_name, 'disease_ratio'] = cells['disease_label'].mean()
             adata_codebook.obs.loc[code_name, 'attn_cell_mean'] = scores.mean()
             adata_codebook.obs.loc[code_name, 'attn_cell_std'] = scores.std()
             adata_codebook.obs.loc[code_name, 'attn_cell_median'] = scores.median()
@@ -818,8 +816,7 @@ def main():
         # Save codebook adata
         if args.save_codebook_adata and not args.no_codebook_adata:
             codebook_adata = create_codebook_adata(
-                codebook, results_df, attn_direct, attn_direct_folds,
-                label_col=config.data.columns.disease_label
+                codebook, results_df, attn_direct, attn_direct_folds
             )
             codebook_adata.write_h5ad(output_dir / "codebook_adata.h5ad")
             print(f"  Saved: codebook_adata.h5ad")
