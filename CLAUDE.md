@@ -133,6 +133,7 @@ python scripts/04_cross_disease_eval.py --model_dir results/skin3/final_model_* 
   - Cell-level: `vq_code`, `X_pretrained`, `X_scmild` 추가
   - Codebook-level: `attn_direct` (codebook 직접 통과), `attn_cell_*` (cell 기반 통계)
   - CV 모드 fold별 attention 통계 지원
+  - Attention 정규화: `attention_score_global` (전체 기준), `attention_score_sample` (sample 내)
 
 ### 이전 변경 (2026-02-03)
 - `02_train_loocv.py` → `02_train_cv.py` 일반화: LOOCV, Stratified K-Fold, Repeated K-Fold 지원
