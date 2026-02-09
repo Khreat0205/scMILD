@@ -63,7 +63,6 @@ _spec.loader.exec_module(_scoring)
 load_pretrained_encoder = _scoring.load_pretrained_encoder
 load_trained_models = _scoring.load_trained_models
 compute_codebook_direct_attention = _scoring.compute_codebook_direct_attention
-normalize_attention_global = _scoring.normalize_attention_global
 ensure_embedding_column = _scoring.ensure_embedding_column
 
 
@@ -306,12 +305,8 @@ def build_multi_model_cell_adata(
     scored_adata.uns['model_info'] = model_infos
 
     # Per-model columns
-    sample_ids = adata.obs[sample_col].values
-
     for suffix, results in model_results.items():
-        raw = results['attention_score_raw']
-        scored_adata.obs[f'attn_raw_{suffix}'] = raw
-        scored_adata.obs[f'attn_minmax_{suffix}'] = normalize_attention_global(raw)
+        scored_adata.obs[f'attn_raw_{suffix}'] = results['attention_score_raw']
         scored_adata.obs[f'student_prediction_{suffix}'] = results['student_prediction']
         scored_adata.obsm[f'X_scmild_{suffix}'] = results['X_scmild'].astype(np.float32)
 
@@ -330,7 +325,6 @@ def build_multi_model_codebook_adata(
 
     컬럼 네이밍은 cell-level adata와 통일:
     - attn_raw_{suffix}: codebook 직접 통과 attention (raw logit)
-    - attn_minmax_{suffix}: 해당 code 할당 cell들의 attn_minmax 평균
     - student_prediction_{suffix}: codebook 직접 통과 student prediction
     - n_cells_{data_name}, n_samples_{data_name}, disease_ratio_{data_name}: 데이터셋별
     """
@@ -357,7 +351,6 @@ def build_multi_model_codebook_adata(
     for suffix in model_results:
         adata_cb.obs[f'attn_raw_{suffix}'] = model_results[suffix]['attn_direct']
         adata_cb.obs[f'student_prediction_{suffix}'] = model_results[suffix]['student_direct']
-        adata_cb.obs[f'attn_minmax_{suffix}'] = np.nan
 
     # Compute per-code statistics
     print("Computing codebook statistics...")
@@ -374,11 +367,6 @@ def build_multi_model_codebook_adata(
         if n_cells > 0:
             if disease_labels is not None:
                 adata_cb.obs.loc[code_name, f'disease_ratio_{data_name}'] = disease_labels[mask].mean()
-
-            for suffix in model_results:
-                minmax_col = f'attn_minmax_{suffix}'
-                scores = scored_adata.obs.loc[mask, minmax_col].values
-                adata_cb.obs.loc[code_name, f'attn_minmax_{suffix}'] = scores.mean()
 
     # Convert dtypes
     adata_cb.obs['code_idx'] = adata_cb.obs['code_idx'].astype(int)
@@ -412,9 +400,7 @@ def build_cell_scores_csv(
         df['disease_label'] = adata.obs[label_col].values
 
     for suffix, results in model_results.items():
-        raw = results['attention_score_raw']
-        df[f'attn_raw_{suffix}'] = raw
-        df[f'attn_minmax_{suffix}'] = normalize_attention_global(raw)
+        df[f'attn_raw_{suffix}'] = results['attention_score_raw']
         df[f'student_prediction_{suffix}'] = results['student_prediction']
 
     return df
@@ -641,11 +627,11 @@ def main():
 
     # Per-model sample summary
     for suffix in model_results:
-        minmax_col = f'attn_minmax_{suffix}'
+        attn_col = f'attn_raw_{suffix}'
         student_col = f'student_prediction_{suffix}'
 
         agg_dict = {
-            minmax_col: ['mean', 'std', 'max'],
+            attn_col: ['mean', 'std', 'max'],
             student_col: ['mean', 'std'],
         }
 
