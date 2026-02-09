@@ -62,7 +62,6 @@ _spec.loader.exec_module(_scoring)
 
 load_pretrained_encoder = _scoring.load_pretrained_encoder
 load_trained_models = _scoring.load_trained_models
-compute_codebook_direct_attention = _scoring.compute_codebook_direct_attention
 ensure_embedding_column = _scoring.ensure_embedding_column
 
 
@@ -71,22 +70,71 @@ ensure_embedding_column = _scoring.ensure_embedding_column
 # ============================================================================
 
 @torch.no_grad()
-def compute_codebook_direct_student(
-    model_encoder, model_student, device: torch.device
-) -> np.ndarray:
-    """Compute student predictions by passing codebook directly through student branch.
+def _project_codebook(
+    codebook: np.ndarray, model_encoder, device: torch.device
+) -> torch.Tensor:
+    """Apply model-specific projection to codebook vectors.
 
-    codebook → projection → student → softmax[:, 1]
+    Args:
+        codebook: Shared pretrained codebook (num_codes, latent_dim) as numpy array
+        model_encoder: VQEncoderWrapperConditional with projection layer
+        device: torch device
+
+    Returns:
+        Projected codebook tensor on device
+    """
+    codebook_t = torch.tensor(codebook, dtype=torch.float32, device=device)
+    if model_encoder.projection is not None:
+        return model_encoder.projection(codebook_t)
+    return codebook_t
+
+
+@torch.no_grad()
+def compute_codebook_direct_attention(
+    codebook: np.ndarray,
+    model_encoder, model_teacher,
+    device: torch.device
+) -> np.ndarray:
+    """Compute attention scores by passing shared codebook through projection → attention.
+
+    NOTE: Uses the shared pretrained codebook (not model_encoder.vq_model's copy)
+    to ensure consistency with cell-level X_pretrained encoding.
+
+    Args:
+        codebook: Shared pretrained codebook (num_codes, latent_dim) as numpy array
+        model_encoder: VQEncoderWrapperConditional with projection layer
+        model_teacher: TeacherBranch with attention_module
+        device: torch device
+    """
+    model_encoder.eval()
+    model_teacher.eval()
+
+    codebook_projected = _project_codebook(codebook, model_encoder, device)
+    attn_direct = model_teacher.attention_module(codebook_projected)
+    return attn_direct.squeeze().cpu().numpy()
+
+
+@torch.no_grad()
+def compute_codebook_direct_student(
+    codebook: np.ndarray,
+    model_encoder, model_student,
+    device: torch.device
+) -> np.ndarray:
+    """Compute student predictions by passing shared codebook through projection → student.
+
+    NOTE: Uses the shared pretrained codebook (not model_encoder.vq_model's copy)
+    to ensure consistency with cell-level X_pretrained encoding.
+
+    Args:
+        codebook: Shared pretrained codebook (num_codes, latent_dim) as numpy array
+        model_encoder: VQEncoderWrapperConditional with projection layer
+        model_student: StudentBranch
+        device: torch device
     """
     model_encoder.eval()
     model_student.eval()
 
-    codebook = model_encoder.vq_model.quantizer.get_codebook().to(device)
-    if model_encoder.projection is not None:
-        codebook_projected = model_encoder.projection(codebook)
-    else:
-        codebook_projected = codebook
-
+    codebook_projected = _project_codebook(codebook, model_encoder, device)
     student_out = model_student(codebook_projected)
     student_probs = torch.softmax(student_out, dim=1)[:, 1]
     return student_probs.cpu().numpy()
@@ -536,9 +584,9 @@ def main():
             device, args.batch_size
         )
 
-        # Codebook direct scores
-        attn_direct = compute_codebook_direct_attention(model_encoder, model_teacher, device)
-        student_direct = compute_codebook_direct_student(model_encoder, model_student, device)
+        # Codebook direct scores (using shared pretrained codebook for consistency)
+        attn_direct = compute_codebook_direct_attention(codebook, model_encoder, model_teacher, device)
+        student_direct = compute_codebook_direct_student(codebook, model_encoder, model_student, device)
         results['attn_direct'] = attn_direct
         results['student_direct'] = student_direct
 
