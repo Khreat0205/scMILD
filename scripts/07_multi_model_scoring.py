@@ -30,14 +30,13 @@ Usage:
         --gpu 0
 """
 
-import os
 import sys
 import argparse
 import json
 import gc
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, List, Tuple, NamedTuple
+from typing import Optional, Dict, Tuple, NamedTuple
 
 import torch
 torch.set_num_threads(16)
@@ -65,8 +64,73 @@ load_pretrained_encoder = _scoring.load_pretrained_encoder
 load_trained_models = _scoring.load_trained_models
 compute_codebook_direct_attention = _scoring.compute_codebook_direct_attention
 normalize_attention_global = _scoring.normalize_attention_global
-normalize_attention_per_sample = _scoring.normalize_attention_per_sample
 ensure_embedding_column = _scoring.ensure_embedding_column
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+@torch.no_grad()
+def compute_codebook_direct_student(
+    model_encoder, model_student, device: torch.device
+) -> np.ndarray:
+    """Compute student predictions by passing codebook directly through student branch.
+
+    codebook → projection → student → softmax[:, 1]
+    """
+    model_encoder.eval()
+    model_student.eval()
+
+    codebook = model_encoder.vq_model.quantizer.get_codebook().to(device)
+    if model_encoder.projection is not None:
+        codebook_projected = model_encoder.projection(codebook)
+    else:
+        codebook_projected = codebook
+
+    student_out = model_student(codebook_projected)
+    student_probs = torch.softmax(student_out, dim=1)[:, 1]
+    return student_probs.cpu().numpy()
+
+
+def extract_data_name(
+    config_path: str, cli_data_name: Optional[str] = None
+) -> str:
+    """Extract data.info.name from raw YAML config, with CLI override."""
+    if cli_data_name:
+        return cli_data_name
+
+    import yaml as _yaml
+    config_path = Path(config_path)
+    with open(config_path, "r", encoding="utf-8") as f:
+        raw = _yaml.safe_load(f)
+
+    # _base_ 상속 처리
+    if "_base_" in raw:
+        base_path = config_path.parent / raw["_base_"]
+        with open(base_path, "r", encoding="utf-8") as f:
+            base = _yaml.safe_load(f)
+        del raw["_base_"]
+        # deep merge: base에 raw overlay
+        def _deep_update(d, u):
+            for k, v in u.items():
+                if isinstance(v, dict) and isinstance(d.get(k), dict):
+                    _deep_update(d[k], v)
+                else:
+                    d[k] = v
+            return d
+        raw = _deep_update(base, raw)
+
+    name = raw.get("data", {}).get("info", {}).get("name")
+    if name:
+        return name
+
+    # fallback: subset values에서 추론
+    subset_vals = raw.get("data", {}).get("subset", {}).get("values", [])
+    if subset_vals:
+        return "_".join(subset_vals)
+
+    return "unknown"
 
 
 # ============================================================================
@@ -246,9 +310,8 @@ def build_multi_model_cell_adata(
 
     for suffix, results in model_results.items():
         raw = results['attention_score_raw']
-        scored_adata.obs[f'attention_score_raw_{suffix}'] = raw
-        scored_adata.obs[f'attention_score_global_{suffix}'] = normalize_attention_global(raw)
-        scored_adata.obs[f'attention_score_sample_{suffix}'] = normalize_attention_per_sample(raw, sample_ids)
+        scored_adata.obs[f'attn_raw_{suffix}'] = raw
+        scored_adata.obs[f'attn_minmax_{suffix}'] = normalize_attention_global(raw)
         scored_adata.obs[f'student_prediction_{suffix}'] = results['student_prediction']
         scored_adata.obsm[f'X_scmild_{suffix}'] = results['X_scmild'].astype(np.float32)
 
@@ -260,9 +323,17 @@ def build_multi_model_codebook_adata(
     scored_adata: sc.AnnData,
     model_results: Dict[str, Dict[str, np.ndarray]],
     sample_col: str,
+    data_name: str,
     label_col: Optional[str] = None,
 ) -> sc.AnnData:
-    """Build codebook-level AnnData with multi-model statistics."""
+    """Build codebook-level AnnData with multi-model statistics.
+
+    컬럼 네이밍은 cell-level adata와 통일:
+    - attn_raw_{suffix}: codebook 직접 통과 attention (raw logit)
+    - attn_minmax_{suffix}: 해당 code 할당 cell들의 attn_minmax 평균
+    - student_prediction_{suffix}: codebook 직접 통과 student prediction
+    - n_cells_{data_name}, n_samples_{data_name}, disease_ratio_{data_name}: 데이터셋별
+    """
     num_codes = codebook.shape[0]
 
     adata_cb = sc.AnnData(X=codebook.astype(np.float32))
@@ -272,22 +343,21 @@ def build_multi_model_codebook_adata(
     vq_codes = scored_adata.obs['vq_code'].values
     sample_ids = scored_adata.obs[sample_col].values
 
-    # Shared code statistics
-    adata_cb.obs['n_cells'] = 0
-    adata_cb.obs['n_samples'] = 0
+    # Dataset-specific code statistics
+    adata_cb.obs[f'n_cells_{data_name}'] = 0
+    adata_cb.obs[f'n_samples_{data_name}'] = 0
 
     if label_col and label_col in scored_adata.obs.columns:
-        adata_cb.obs['disease_ratio'] = np.nan
+        adata_cb.obs[f'disease_ratio_{data_name}'] = np.nan
         disease_labels = scored_adata.obs[label_col].values
     else:
         disease_labels = None
 
-    # Per-model codebook columns init
+    # Per-model codebook columns: direct scores
     for suffix in model_results:
-        adata_cb.obs[f'attn_direct_{suffix}'] = model_results[suffix]['attn_direct']
-        for stat in ['mean', 'std', 'median', 'max']:
-            adata_cb.obs[f'attn_cell_{stat}_{suffix}'] = np.nan
-        adata_cb.obs[f'attn_cell_n_{suffix}'] = 0
+        adata_cb.obs[f'attn_raw_{suffix}'] = model_results[suffix]['attn_direct']
+        adata_cb.obs[f'student_prediction_{suffix}'] = model_results[suffix]['student_direct']
+        adata_cb.obs[f'attn_minmax_{suffix}'] = np.nan
 
     # Compute per-code statistics
     print("Computing codebook statistics...")
@@ -296,28 +366,24 @@ def build_multi_model_codebook_adata(
         mask = vq_codes == code_idx
         n_cells = mask.sum()
 
-        adata_cb.obs.loc[code_name, 'n_cells'] = n_cells
-        adata_cb.obs.loc[code_name, 'n_samples'] = len(np.unique(sample_ids[mask])) if n_cells > 0 else 0
+        adata_cb.obs.loc[code_name, f'n_cells_{data_name}'] = n_cells
+        adata_cb.obs.loc[code_name, f'n_samples_{data_name}'] = (
+            len(np.unique(sample_ids[mask])) if n_cells > 0 else 0
+        )
 
         if n_cells > 0:
             if disease_labels is not None:
-                adata_cb.obs.loc[code_name, 'disease_ratio'] = disease_labels[mask].mean()
+                adata_cb.obs.loc[code_name, f'disease_ratio_{data_name}'] = disease_labels[mask].mean()
 
             for suffix in model_results:
-                global_col = f'attention_score_global_{suffix}'
-                scores = scored_adata.obs.loc[mask, global_col].values
-
-                adata_cb.obs.loc[code_name, f'attn_cell_mean_{suffix}'] = scores.mean()
-                adata_cb.obs.loc[code_name, f'attn_cell_std_{suffix}'] = scores.std()
-                adata_cb.obs.loc[code_name, f'attn_cell_median_{suffix}'] = np.median(scores)
-                adata_cb.obs.loc[code_name, f'attn_cell_max_{suffix}'] = scores.max()
-                adata_cb.obs.loc[code_name, f'attn_cell_n_{suffix}'] = n_cells
+                minmax_col = f'attn_minmax_{suffix}'
+                scores = scored_adata.obs.loc[mask, minmax_col].values
+                adata_cb.obs.loc[code_name, f'attn_minmax_{suffix}'] = scores.mean()
 
     # Convert dtypes
-    for col in ['code_idx', 'n_cells', 'n_samples']:
-        adata_cb.obs[col] = adata_cb.obs[col].astype(int)
-    for suffix in model_results:
-        adata_cb.obs[f'attn_cell_n_{suffix}'] = adata_cb.obs[f'attn_cell_n_{suffix}'].astype(int)
+    adata_cb.obs['code_idx'] = adata_cb.obs['code_idx'].astype(int)
+    adata_cb.obs[f'n_cells_{data_name}'] = adata_cb.obs[f'n_cells_{data_name}'].astype(int)
+    adata_cb.obs[f'n_samples_{data_name}'] = adata_cb.obs[f'n_samples_{data_name}'].astype(int)
 
     return adata_cb
 
@@ -345,12 +411,10 @@ def build_cell_scores_csv(
     if label_col and label_col in adata.obs.columns:
         df['disease_label'] = adata.obs[label_col].values
 
-    sample_ids = adata.obs[sample_col].values
     for suffix, results in model_results.items():
         raw = results['attention_score_raw']
-        df[f'attention_score_raw_{suffix}'] = raw
-        df[f'attention_score_global_{suffix}'] = normalize_attention_global(raw)
-        df[f'attention_score_sample_{suffix}'] = normalize_attention_per_sample(raw, sample_ids)
+        df[f'attn_raw_{suffix}'] = raw
+        df[f'attn_minmax_{suffix}'] = normalize_attention_global(raw)
         df[f'student_prediction_{suffix}'] = results['student_prediction']
 
     return df
@@ -380,6 +444,11 @@ def main():
         "--data_path", type=str, default=None,
         help="Override data path (instead of config's whole_adata_path)"
     )
+    parser.add_argument(
+        "--data_name", type=str, default=None,
+        help="Dataset name for codebook statistics suffix "
+             "(default: auto-detect from data_config's data.info.name)"
+    )
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory")
     parser.add_argument("--gpu", type=int, default=0, help="GPU ID")
     parser.add_argument("--batch_size", type=int, default=10000, help="Batch size")
@@ -396,9 +465,13 @@ def main():
     if len(set(suffixes)) != len(suffixes):
         raise ValueError(f"Duplicate model suffixes: {suffixes}")
 
+    # Extract data_name
+    data_name = extract_data_name(args.data_config, args.data_name)
+
     print(f"Models to score ({len(model_specs)}):")
     for ms in model_specs:
         print(f"  [{ms.suffix}] dir={ms.model_dir}, config={ms.config_path}")
+    print(f"Data name: {data_name}")
 
     # Setup
     device = torch.device(f"cuda:{args.gpu}" if torch.cuda.is_available() else "cpu")
@@ -448,7 +521,6 @@ def main():
     print(f"  vq_codes: {vq_codes.shape}, unique: {len(np.unique(vq_codes))}")
     print(f"  codebook: {codebook.shape}")
 
-    # Keep encoder model for building wrappers, but free unused memory
     del model_config
     gc.collect()
 
@@ -478,9 +550,11 @@ def main():
             device, args.batch_size
         )
 
-        # Codebook direct attention
+        # Codebook direct scores
         attn_direct = compute_codebook_direct_attention(model_encoder, model_teacher, device)
+        student_direct = compute_codebook_direct_student(model_encoder, model_student, device)
         results['attn_direct'] = attn_direct
+        results['student_direct'] = student_direct
 
         model_results[ms.suffix] = results
 
@@ -492,8 +566,10 @@ def main():
             'latent_dim': codebook.shape[1],
         }
 
-        print(f"  attention_score_raw range: [{results['attention_score_raw'].min():.4f}, {results['attention_score_raw'].max():.4f}]")
+        print(f"  attn_raw range: [{results['attention_score_raw'].min():.4f}, {results['attention_score_raw'].max():.4f}]")
         print(f"  student_prediction range: [{results['student_prediction'].min():.4f}, {results['student_prediction'].max():.4f}]")
+        print(f"  codebook attn_direct range: [{attn_direct.min():.4f}, {attn_direct.max():.4f}]")
+        print(f"  codebook student_direct range: [{student_direct.min():.4f}, {student_direct.max():.4f}]")
 
         # Cleanup
         del model_teacher, model_student, model_encoder, model_config
@@ -516,12 +592,13 @@ def main():
     sample_name_col = data_config.data.columns.sample_name
     label_col = data_config.data.columns.disease_label
 
-    # Add timestamp to model_infos
+    # Metadata
     timestamp = datetime.now().isoformat()
     combined_info = {
         'timestamp': timestamp,
         'data_config': args.data_config,
         'data_path': args.data_path,
+        'data_name': data_name,
         'models': model_infos,
     }
 
@@ -537,7 +614,7 @@ def main():
     if not args.no_codebook_adata:
         codebook_adata = build_multi_model_codebook_adata(
             codebook, scored_adata, model_results,
-            sample_col, label_col
+            sample_col, data_name, label_col
         )
         codebook_adata.write_h5ad(output_dir / "codebook_adata.h5ad")
         print(f"  Saved: codebook_adata.h5ad ({codebook_adata.n_obs} codes)")
@@ -564,11 +641,11 @@ def main():
 
     # Per-model sample summary
     for suffix in model_results:
-        global_col = f'attention_score_global_{suffix}'
+        minmax_col = f'attn_minmax_{suffix}'
         student_col = f'student_prediction_{suffix}'
 
         agg_dict = {
-            global_col: ['mean', 'std', 'max'],
+            minmax_col: ['mean', 'std', 'max'],
             student_col: ['mean', 'std'],
         }
 
