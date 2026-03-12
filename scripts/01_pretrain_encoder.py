@@ -28,8 +28,9 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import load_config
-from src.data import load_adata, preprocess_adata, encode_labels, print_adata_summary
+from src.data import load_adata, preprocess_adata, encode_labels, encode_celltype_labels, print_adata_summary
 from src.models.autoencoder import VQ_AENB_Conditional
+from src.models.celltype_classifier import CelltypeClassifier
 from src.training import AETrainer
 
 
@@ -43,7 +44,8 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def create_dataloader(adata, device, conditional_col: str, batch_size=256, shuffle=True):
+def create_dataloader(adata, device, conditional_col: str, batch_size=256, shuffle=True,
+                      celltype_ids=None):
     """Create dataloader from AnnData.
 
     Args:
@@ -52,6 +54,7 @@ def create_dataloader(adata, device, conditional_col: str, batch_size=256, shuff
         conditional_col: Column name for conditional IDs (e.g., 'study_id_numeric', 'Organ_id_numeric')
         batch_size: Batch size
         shuffle: Whether to shuffle
+        celltype_ids: Optional numpy array of celltype labels (-1 for missing)
     """
     # Extract data
     if hasattr(adata.X, 'toarray'):
@@ -64,8 +67,12 @@ def create_dataloader(adata, device, conditional_col: str, batch_size=256, shuff
         adata.obs[conditional_col].values, dtype=torch.long
     )
 
-    # Create dataset
-    dataset = TensorDataset(data, conditional_ids)
+    # Create dataset (with optional celltype labels)
+    if celltype_ids is not None:
+        ct_tensor = torch.tensor(celltype_ids, dtype=torch.long)
+        dataset = TensorDataset(data, conditional_ids, ct_tensor)
+    else:
+        dataset = TensorDataset(data, conditional_ids)
 
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
@@ -91,6 +98,14 @@ def main():
     parser.add_argument("--epochs", type=int, default=None, help="Number of epochs")
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
     parser.add_argument("--patience", type=int, default=None, help="Early stopping patience")
+
+    # Celltype auxiliary task overrides
+    parser.add_argument("--celltype_aux", action="store_true",
+        help="Enable celltype auxiliary loss (overrides config)")
+    parser.add_argument("--celltype_column", type=str, default=None,
+        help="Column in adata.obs for celltype labels")
+    parser.add_argument("--celltype_loss_weight", type=float, default=None,
+        help="Weight for celltype auxiliary loss")
 
     # Auto-registration options
     parser.add_argument("--register", action="store_true",
@@ -193,13 +208,77 @@ def main():
     input_dim = adata.n_vars
     print(f"Input dimension: {input_dim}")
 
+    # === Celltype auxiliary task setup ===
+    celltype_classifier = None
+    celltype_ids = None
+    ct_loss_weight = 0.0
+
+    # Determine celltype aux settings (CLI overrides config)
+    ct_aux_enabled = args.celltype_aux
+    ct_aux_column = args.celltype_column
+    ct_aux_loss_weight = args.celltype_loss_weight
+
+    if args.config and hasattr(config.encoder.pretrain, 'celltype_aux'):
+        ct_aux_cfg = config.encoder.pretrain.celltype_aux
+        if not ct_aux_enabled:
+            ct_aux_enabled = ct_aux_cfg.enabled
+        if ct_aux_column is None:
+            ct_aux_column = ct_aux_cfg.column
+        if ct_aux_loss_weight is None:
+            ct_aux_loss_weight = ct_aux_cfg.loss_weight
+        ct_aux_hidden_dim = ct_aux_cfg.hidden_dim
+        ct_aux_n_layers = ct_aux_cfg.n_layers
+        ct_aux_missing_label = ct_aux_cfg.missing_label
+        ct_aux_dropout = ct_aux_cfg.dropout
+    else:
+        # Defaults when no config
+        if ct_aux_column is None:
+            ct_aux_column = "celltype_lineage"
+        if ct_aux_loss_weight is None:
+            ct_aux_loss_weight = 0.1
+        ct_aux_hidden_dim = 64
+        ct_aux_n_layers = 1
+        ct_aux_missing_label = "MISSING"
+        ct_aux_dropout = 0.1
+
+    if ct_aux_enabled:
+        print(f"\n{'='*60}")
+        print("Celltype auxiliary task")
+        print(f"{'='*60}")
+        print(f"  Column: {ct_aux_column}")
+        celltype_ids, ct_mapping, n_ct_classes = encode_celltype_labels(
+            adata,
+            celltype_col=ct_aux_column,
+            missing_label=ct_aux_missing_label,
+        )
+        n_valid = (celltype_ids >= 0).sum()
+        n_missing = (celltype_ids < 0).sum()
+        print(f"  Valid celltype labels: {n_valid} ({n_valid/len(celltype_ids)*100:.1f}%)")
+        print(f"  Missing celltype labels: {n_missing} ({n_missing/len(celltype_ids)*100:.1f}%)")
+        print(f"  Number of celltype classes: {n_ct_classes}")
+
+        if n_ct_classes > 0 and n_valid > 0:
+            ct_loss_weight = ct_aux_loss_weight
+            celltype_classifier = CelltypeClassifier(
+                input_dim=latent_dim,
+                n_classes=n_ct_classes,
+                hidden_dim=ct_aux_hidden_dim,
+                n_layers=ct_aux_n_layers,
+                dropout=ct_aux_dropout,
+            ).to(device)
+            print(f"  Classifier: {ct_aux_n_layers} hidden layer(s), hidden_dim={ct_aux_hidden_dim}")
+            print(f"  Loss weight: {ct_loss_weight}")
+        else:
+            print("  WARNING: No valid celltype labels found. Aux loss disabled.")
+
     # Create dataloader
     print("\nCreating dataloader...")
     train_loader = create_dataloader(
         adata, device,
         conditional_col=conditional_encoded_col,
         batch_size=batch_size,
-        shuffle=True
+        shuffle=True,
+        celltype_ids=celltype_ids,
     )
 
     # Create model
@@ -223,7 +302,11 @@ def main():
     print(f"  Hidden layers: {hidden_layers}")
 
     # Create trainer
-    trainer = AETrainer(model, device, is_conditional=True)
+    trainer = AETrainer(
+        model, device, is_conditional=True,
+        celltype_classifier=celltype_classifier,
+        celltype_loss_weight=ct_loss_weight,
+    )
 
     # Train
     print(f"\n{'='*60}")
@@ -274,12 +357,38 @@ def main():
     with open(mapping_path, 'w') as f:
         json.dump({str(k): v for k, v in id_to_name.items()}, f, indent=2)
 
+    # Save celltype classifier and mapping (separate from encoder)
+    if celltype_classifier is not None:
+        ct_classifier_path = output_path / "celltype_classifier.pth"
+        torch.save({
+            'model_state_dict': celltype_classifier.state_dict(),
+            'n_classes': n_ct_classes,
+            'celltype_mapping': ct_mapping,
+            'config': {
+                'input_dim': latent_dim,
+                'hidden_dim': ct_aux_hidden_dim,
+                'n_layers': ct_aux_n_layers,
+                'dropout': ct_aux_dropout,
+                'loss_weight': ct_loss_weight,
+                'column': ct_aux_column,
+            }
+        }, str(ct_classifier_path))
+        print(f"Celltype classifier saved to: {ct_classifier_path}")
+
+        ct_mapping_path = output_path / "celltype_mapping.json"
+        with open(ct_mapping_path, 'w') as f:
+            json.dump(ct_mapping, f, indent=2)
+        print(f"Celltype mapping saved to: {ct_mapping_path}")
+
     print(f"\n{'='*60}")
     print("Training complete!")
     print(f"{'='*60}")
     print(f"Model saved to: {model_path}")
     print(f"History saved to: {history_path}")
     print(f"{conditional_col} mapping saved to: {mapping_path}")
+    if celltype_classifier is not None:
+        print(f"Celltype classifier saved to: {ct_classifier_path}")
+        print(f"Celltype mapping saved to: {ct_mapping_path}")
 
     # Auto-registration to pretrained directory
     if args.register:

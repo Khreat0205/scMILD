@@ -80,12 +80,25 @@ class SplittingConfig:
 
 
 @dataclass
+class CelltypeAuxConfig:
+    """Celltype auxiliary classification loss 설정 (pretraining용)"""
+    enabled: bool = False
+    column: str = "celltype_lineage"    # adata.obs에서 celltype 컬럼명
+    loss_weight: float = 0.1            # Auxiliary loss 가중치
+    hidden_dim: int = 64                # Classifier hidden dimension
+    n_layers: int = 1                   # Hidden layer 수 (1-2)
+    missing_label: str = "MISSING"      # 미주석 세포의 sentinel value
+    dropout: float = 0.1
+
+
+@dataclass
 class EncoderPretrainConfig:
     """Encoder pretrain 설정"""
     batch_size: int = 256
     learning_rate: float = 0.001
     epochs: int = 50
     patience: int = 5
+    celltype_aux: CelltypeAuxConfig = field(default_factory=CelltypeAuxConfig)
 
 
 @dataclass
@@ -374,7 +387,16 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
 
     # Encoder config (nested)
     encoder_dict = d.get("encoder", {})
-    pretrain = _make_dataclass(EncoderPretrainConfig, encoder_dict.get("pretrain"))
+    pretrain_dict = encoder_dict.get("pretrain", {})
+    celltype_aux = _make_dataclass(CelltypeAuxConfig, pretrain_dict.get("celltype_aux") if pretrain_dict else None)
+    pretrain_fields = {k: v for k, v in pretrain_dict.items() if k != "celltype_aux"} if pretrain_dict else {}
+    pretrain = EncoderPretrainConfig(
+        batch_size=pretrain_fields.get("batch_size", 256),
+        learning_rate=pretrain_fields.get("learning_rate", 0.001),
+        epochs=pretrain_fields.get("epochs", 50),
+        patience=pretrain_fields.get("patience", 5),
+        celltype_aux=celltype_aux,
+    )
     # Support both new (conditional_emb_dim) and old (study_emb_dim) config keys
     conditional_emb_dim = encoder_dict.get("conditional_emb_dim",
                                            encoder_dict.get("study_emb_dim", 16))

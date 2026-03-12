@@ -12,6 +12,7 @@ from .attention import AttentionModule, GatedAttentionModule
 from .branches import TeacherBranch, StudentBranch
 from .autoencoder import AENB, VQ_AENB, VQ_AENB_Conditional
 from .encoder_wrapper import VQEncoderWrapper, VQEncoderWrapperConditional
+from .celltype_classifier import CelltypeClassifier
 
 __all__ = [
     # Attention
@@ -27,4 +28,6 @@ __all__ = [
     # Wrappers
     "VQEncoderWrapper",
     "VQEncoderWrapperConditional",
+    # Auxiliary classifiers
+    "CelltypeClassifier",
 ]

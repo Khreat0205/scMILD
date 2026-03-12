@@ -31,6 +31,7 @@ from .preprocessing import (
     print_adata_summary,
     subsample_adata,
     encode_labels,
+    encode_celltype_labels,
     # Conditional mapping functions (general purpose)
     get_conditional_mapping,
     load_conditional_mapping,
@@ -64,6 +65,7 @@ __all__ = [
     "print_adata_summary",
     "subsample_adata",
     "encode_labels",
+    "encode_celltype_labels",
     # Conditional mapping functions (general purpose)
     "get_conditional_mapping",
     "load_conditional_mapping",

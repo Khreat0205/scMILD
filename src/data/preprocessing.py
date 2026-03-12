@@ -215,6 +215,46 @@ def encode_labels(
     return adata, encoding_info
 
 
+def encode_celltype_labels(
+    adata,
+    celltype_col: str = "celltype_lineage",
+    missing_label: str = "MISSING",
+):
+    """
+    Celltype 레이블을 숫자로 인코딩합니다. 미주석 세포는 -1로 처리합니다.
+
+    Args:
+        adata: AnnData object
+        celltype_col: Column in adata.obs with celltype annotations
+        missing_label: Sentinel value for cells without annotation
+
+    Returns:
+        celltype_ids: numpy array of int64, shape (n_cells,). -1 = missing.
+        celltype_mapping: dict {celltype_name: int_id}
+        n_classes: number of valid classes (excluding missing)
+    """
+    import numpy as np
+
+    if celltype_col not in adata.obs.columns:
+        celltype_ids = np.full(adata.n_obs, -1, dtype=np.int64)
+        return celltype_ids, {}, 0
+
+    # Get raw values, fill NaN with missing_label
+    raw_labels = adata.obs[celltype_col].fillna(missing_label).values
+
+    # Build mapping excluding the sentinel
+    unique_labels = sorted(set(raw_labels) - {missing_label})
+    celltype_mapping = {name: idx for idx, name in enumerate(unique_labels)}
+    n_classes = len(unique_labels)
+
+    # Encode: valid celltypes get their ID, missing gets -1
+    celltype_ids = np.array([
+        celltype_mapping.get(label, -1) for label in raw_labels
+    ], dtype=np.int64)
+
+    return celltype_ids, celltype_mapping, n_classes
+
+
 def get_conditional_mapping(adata, sample_col: str = "sample_id_numeric", conditional_col: str = "study_id_numeric") -> dict:
     """
     Sample ID → Conditional ID (study or organ) 매핑을 생성합니다.

@@ -5,6 +5,7 @@ VQ-AENB 및 VQ-AENB-Conditional 학습을 담당합니다.
 """
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 from typing import Optional, Tuple, Dict
@@ -57,11 +58,15 @@ class AETrainer:
         self,
         model: nn.Module,
         device: torch.device,
-        is_conditional: bool = True
+        is_conditional: bool = True,
+        celltype_classifier: nn.Module = None,
+        celltype_loss_weight: float = 0.1,
     ):
         self.model = model
         self.device = device
         self.is_conditional = is_conditional
+        self.celltype_classifier = celltype_classifier
+        self.celltype_loss_weight = celltype_loss_weight
 
     def train(
         self,
@@ -91,7 +96,11 @@ class AETrainer:
         Returns:
             history: Dictionary with training history
         """
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        # Build optimizer with both model and classifier params
+        params = list(self.model.parameters())
+        if self.celltype_classifier is not None:
+            params += list(self.celltype_classifier.parameters())
+        optimizer = torch.optim.Adam(params, lr=learning_rate)
 
         # Determine stratification strategy
         if stratify_codebook is None:
@@ -106,22 +115,25 @@ class AETrainer:
         history = {
             'train_loss': [],
             'val_loss': [],
-            'commitment_loss': []
+            'commitment_loss': [],
+            'celltype_loss': [],
         }
 
         best_loss = float('inf')
         best_state = None
+        best_classifier_state = None
         no_improvement = 0
 
         for epoch in range(n_epochs):
             # Train
-            train_loss, commit_loss = self._train_epoch(train_loader, optimizer)
+            train_loss, commit_loss, ct_loss = self._train_epoch(train_loader, optimizer)
             history['train_loss'].append(train_loss)
             history['commitment_loss'].append(commit_loss)
+            history['celltype_loss'].append(ct_loss)
 
             # Validate
             if val_loader is not None:
-                val_loss, _ = self._evaluate(val_loader)
+                val_loss, _, val_ct_loss = self._evaluate(val_loader)
                 history['val_loss'].append(val_loss)
                 monitor_loss = val_loss
             else:
@@ -131,6 +143,11 @@ class AETrainer:
             if monitor_loss < best_loss:
                 best_loss = monitor_loss
                 best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+                if self.celltype_classifier is not None:
+                    best_classifier_state = {
+                        k: v.cpu().clone()
+                        for k, v in self.celltype_classifier.state_dict().items()
+                    }
                 no_improvement = 0
             else:
                 no_improvement += 1
@@ -143,11 +160,15 @@ class AETrainer:
                 msg = f"Epoch {epoch+1}/{n_epochs} - Train Loss: {train_loss:.4f}"
                 if val_loader is not None:
                     msg += f" - Val Loss: {val_loss:.4f}"
+                if self.celltype_classifier is not None:
+                    msg += f" - CT Loss: {ct_loss:.4f}"
                 print(msg)
 
         # Load best model
         if best_state is not None:
             self.model.load_state_dict(best_state)
+        if best_classifier_state is not None and self.celltype_classifier is not None:
+            self.celltype_classifier.load_state_dict(best_classifier_state)
 
         return history
 
@@ -155,23 +176,41 @@ class AETrainer:
         self,
         dataloader: DataLoader,
         optimizer: torch.optim.Optimizer
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, float]:
         """Train for one epoch."""
         self.model.train()
+        if self.celltype_classifier is not None:
+            self.celltype_classifier.train()
 
         total_loss = 0.0
         total_commit_loss = 0.0
+        total_ct_loss = 0.0
         n_batches = 0
 
         for batch in dataloader:
+            ct_loss = torch.tensor(0.0, device=self.device)
+
             if self.is_conditional:
-                # Expect (data, study_ids, labels) or (data, study_ids)
                 data = batch[0].to(self.device)
                 study_ids = batch[1].to(self.device)
 
-                mu, theta, commit_loss = self.model(data, study_ids, is_train=True)
+                if self.celltype_classifier is not None and len(batch) > 2:
+                    # Decomposed forward to get z_q for celltype classifier
+                    z = self.model.encoder_forward(data, study_ids)
+                    z_q, commit_loss = self.model.quantize(z)
+                    mu, theta = self.model.decoder(z_q, study_ids)
+
+                    # Celltype auxiliary loss
+                    ct_labels = batch[2].to(self.device)
+                    ct_logits = self.celltype_classifier(z_q)
+                    valid_mask = (ct_labels >= 0)
+                    if valid_mask.any():
+                        ct_loss = F.cross_entropy(
+                            ct_logits[valid_mask], ct_labels[valid_mask]
+                        )
+                else:
+                    mu, theta, commit_loss = self.model(data, study_ids, is_train=True)
             else:
-                # Expect (data, ...) - only need first element
                 data = batch[0].to(self.device)
 
                 output = self.model(data, is_train=True)
@@ -185,35 +224,58 @@ class AETrainer:
             recon_loss = negative_binomial_loss(mu, theta, data)
 
             # Total loss
-            loss = recon_loss + commit_loss
+            loss = recon_loss + commit_loss + self.celltype_loss_weight * ct_loss
 
             # Backward
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            if self.celltype_classifier is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    self.celltype_classifier.parameters(), max_norm=1.0
+                )
             optimizer.step()
 
             total_loss += loss.item()
             total_commit_loss += commit_loss.item()
+            total_ct_loss += ct_loss.item()
             n_batches += 1
 
-        return total_loss / n_batches, total_commit_loss / n_batches
+        return total_loss / n_batches, total_commit_loss / n_batches, total_ct_loss / n_batches
 
     @torch.no_grad()
-    def _evaluate(self, dataloader: DataLoader) -> Tuple[float, float]:
+    def _evaluate(self, dataloader: DataLoader) -> Tuple[float, float, float]:
         """Evaluate on dataloader."""
         self.model.eval()
+        if self.celltype_classifier is not None:
+            self.celltype_classifier.eval()
 
         total_loss = 0.0
         total_commit_loss = 0.0
+        total_ct_loss = 0.0
         n_batches = 0
 
         for batch in dataloader:
+            ct_loss = torch.tensor(0.0, device=self.device)
+
             if self.is_conditional:
                 data = batch[0].to(self.device)
                 study_ids = batch[1].to(self.device)
 
-                mu, theta, commit_loss = self.model(data, study_ids, is_train=True)
+                if self.celltype_classifier is not None and len(batch) > 2:
+                    z = self.model.encoder_forward(data, study_ids)
+                    z_q, commit_loss = self.model.quantize(z)
+                    mu, theta = self.model.decoder(z_q, study_ids)
+
+                    ct_labels = batch[2].to(self.device)
+                    ct_logits = self.celltype_classifier(z_q)
+                    valid_mask = (ct_labels >= 0)
+                    if valid_mask.any():
+                        ct_loss = F.cross_entropy(
+                            ct_logits[valid_mask], ct_labels[valid_mask]
+                        )
+                else:
+                    mu, theta, commit_loss = self.model(data, study_ids, is_train=True)
             else:
                 data = batch[0].to(self.device)
 
@@ -225,13 +287,14 @@ class AETrainer:
                     commit_loss = torch.tensor(0.0, device=self.device)
 
             recon_loss = negative_binomial_loss(mu, theta, data)
-            loss = recon_loss + commit_loss
+            loss = recon_loss + commit_loss + self.celltype_loss_weight * ct_loss
 
             total_loss += loss.item()
             total_commit_loss += commit_loss.item()
+            total_ct_loss += ct_loss.item()
             n_batches += 1
 
-        return total_loss / n_batches, total_commit_loss / n_batches
+        return total_loss / n_batches, total_commit_loss / n_batches, total_ct_loss / n_batches
 
     def save(self, path: str, config: Optional[dict] = None):
         """

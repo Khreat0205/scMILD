@@ -90,6 +90,17 @@ encoder:
     epochs: 50
     patience: 5
 
+    # Celltype auxiliary classification loss (pretrain 시 보조 손실)
+    # Codebook이 cell type-discriminative한 representation을 학습하도록 유도
+    celltype_aux:
+      enabled: false                  # true로 설정시 활성화
+      column: "celltype_lineage"      # adata.obs에서 celltype 컬럼명
+      loss_weight: 0.1               # Auxiliary loss 가중치
+      hidden_dim: 64                  # Classifier hidden dimension
+      n_layers: 1                     # Hidden layer 수 (1-2)
+      missing_label: "MISSING"        # 미주석 세포의 sentinel value
+      dropout: 0.1
+
 # ============================================================================
 # MIL (scMILD) 설정
 # ============================================================================
