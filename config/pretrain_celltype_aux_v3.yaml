@@ -1,0 +1,169 @@
+# scMILD Configuration File - Pretrain with Celltype Auxiliary Loss (v3)
+# ==================================================================
+# Study 기반 conditional embedding + celltype classification aux loss
+# v3: NaN-safe params (lr=0.0001, hidden_dim=16, loss_weight=0.1)
+#
+# 실행: python scripts/01_pretrain_encoder.py --config config/pretrain_celltype_aux_v3.yaml --gpu 0 --register
+# Sweep: bash scripts/sweep_pretrain.sh --gpu 1
+
+# ============================================================================
+# 경로 설정 (병원망 환경 기준)
+# ============================================================================
+paths:
+  # 기본 데이터 디렉토리 (input data 위치)
+  data_root: "/home/bmi-user/workspace/data/HSvsCD"
+
+  # 프로젝트 디렉토리 (scMILDQ_Cond - 모든 산출물 저장)
+  project_root: "${paths.data_root}/scMILDQ_Cond"
+
+  # Pretrained encoder 경로 (이 config로 학습 후 생성될 경로)
+  pretrained_encoder: "${paths.project_root}/results/pretrained_skfold_512_celltype_v3/vq_aenb_conditional_whole.pth"
+
+  # 결과 저장 디렉토리
+  output_root: "${paths.project_root}/results"
+
+  # conda 환경
+  conda_env: "/home/bmi-user/workspace/data/scvi-env"
+
+# ============================================================================
+# 데이터 설정
+# ============================================================================
+data:
+  # 전체 AnnData 파일 경로
+  whole_adata_path: "${paths.project_root}/data/Whole_SCP_PCD_Skin_805k_6k_unified_v2.h5ad"
+
+  # Subset 설정 (pretrain에서는 미사용, CV/finalize용)
+  subset:
+    enabled: false
+    column: "study"
+    values: ["GSE220116", "GSE175990", "SCP1884"]
+    cache_dir: "${paths.project_root}/cache"
+    use_cache: true
+
+  # 관측 컬럼명
+  columns:
+    sample_id: "sample_id_numeric"
+    sample_name: "sample"
+    disease_label: "disease_numeric"
+    status: "Status"
+
+  # Conditional encoder용 임베딩 컬럼 설정
+  conditional_embedding:
+    column: "study"
+    encoded_column: "study_id_numeric"
+    mapping_path: "${paths.project_root}/results/pretrained_skfold_512_celltype_v3/study_mapping.json"
+
+# ============================================================================
+# 데이터 분할 설정
+# ============================================================================
+splitting:
+  strategy: "stratified_kfold"
+  n_splits: 5
+  n_repeats: 1
+  random_seed: 42
+
+# ============================================================================
+# Pretrained Encoder 설정 (VQ-AENB-Conditional)
+# ============================================================================
+encoder:
+  # 모델 타입
+  type: "VQ_AENB_Conditional"
+
+  # 아키텍처
+  latent_dim: 128
+  num_codes: 512
+  conditional_emb_dim: 16
+
+  # 학습 설정 (pretrain용)
+  pretrain:
+    batch_size: 2048           # NaN 방지를 위해 큰 배치
+    learning_rate: 0.0001      # 안정적 lr (v2에서 0.001→NaN 경험)
+    epochs: 100
+    patience: 10
+
+    # Celltype auxiliary classification loss
+    celltype_aux:
+      enabled: true
+      column: "celltype_lineage_v2"
+      loss_weight: 0.1
+      hidden_dim: 16
+      n_layers: 1
+      missing_label: "MISSING"
+      dropout: 0.1
+
+# ============================================================================
+# MIL (scMILD) 설정
+# ============================================================================
+mil:
+  latent_dim: 128
+  attention_dim: 128
+  num_classes: 2
+
+  freeze_encoder: true
+  use_projection: true
+  projection_dim: 128
+
+  training:
+    batch_size: 2
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0005
+    epochs: 100
+    patience: 15
+    use_early_stopping: false
+
+  student:
+    enabled: true
+    optimize_period: 1
+
+  loss:
+    negative_weight: 0.3
+    orthogonal_projection_lambda: 0.2
+    disease_ratio_reg:
+      enabled: false
+      lambda_weight: 0.0
+      alpha: 1.0
+      beta: 1.0
+
+# ============================================================================
+# 평가 설정
+# ============================================================================
+evaluation:
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "f1_score"
+    - "precision"
+    - "recall"
+
+  cell_scoring:
+    save_attention_scores: true
+    save_predictions: true
+
+# ============================================================================
+# 로깅 설정
+# ============================================================================
+logging:
+  level: "INFO"
+  save_format: "csv"
+  save_checkpoints: true
+  checkpoint_frequency: 10
+
+# ============================================================================
+# 하드웨어 설정
+# ============================================================================
+hardware:
+  device: "cuda"
+  gpu_ids: [0]
+  num_workers: 4
+
+# ============================================================================
+# 하이퍼파라미터 튜닝 설정
+# ============================================================================
+tuning:
+  learning_rate: [0.001, 0.0001]
+  encoder_learning_rate: [0.0001]
+  epochs: [50]
+  disease_ratio_lambda: [0.0]
+  metric: "auc"
+  results_file: "tuning_results.csv"
+  save_top_k: 3
