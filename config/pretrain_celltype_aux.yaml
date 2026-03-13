@@ -14,7 +14,7 @@ paths:
   project_root: "${paths.data_root}/scMILDQ_Cond"
 
   # Pretrained encoder 경로 (이 config로 학습 후 생성될 경로)
-  pretrained_encoder: "${paths.project_root}/results/pretrained/vq_aenb_conditional_whole.pth"
+  pretrained_encoder: "${paths.project_root}/results/pretrained_skfold_512_celltype/vq_aenb_conditional_whole.pth"
 
   # 결과 저장 디렉토리
   output_root: "${paths.project_root}/results"
@@ -27,14 +27,14 @@ paths:
 # ============================================================================
 data:
   # 전체 AnnData 파일 경로 (input data - 외부 경로)
-  whole_adata_path: "${paths.data_root}/data/Whole_SCP_PCD_Skin_805k_6k.h5ad"
+  whole_adata_path: "${paths.project_root}/data/Whole_SCP_PCD_Skin_805k_6k_unified_v2.h5ad"
 
   # Subset 설정
   # celltype_lineage가 있는 study만 사용하고 싶으면 enabled: true로 변경
   subset:
-    enabled: false
+    enabled: true
     column: "study"
-    values: []                # 예: ["Skin3", "SCP1884", "PCD"] 등 celltype이 있는 study만
+    values: ["GSE220116", "GSE175990", "SCP1884"]                # 예: ["GSE220116", "GSE175990", "SCP1884"] 등 celltype이 있는 study만
     cache_dir: "${paths.project_root}/cache"
     use_cache: true
 
@@ -49,13 +49,13 @@ data:
   conditional_embedding:
     column: "study"
     encoded_column: "study_id_numeric"
-    mapping_path: "${paths.project_root}/results/pretrained/study_mapping.json"
+    mapping_path: "${paths.project_root}/results/pretrained_skfold_512_celltype/study_mapping.json"
 
 # ============================================================================
 # 데이터 분할 설정
 # ============================================================================
 splitting:
-  strategy: "loocv"
+  strategy: "stratified_kfold"
   n_splits: 5
   n_repeats: 1
   random_seed: 42
@@ -69,12 +69,12 @@ encoder:
 
   # 아키텍처
   latent_dim: 128
-  num_codes: 1024
+  num_codes: 512
   conditional_emb_dim: 16
 
   # 학습 설정 (pretrain용)
   pretrain:
-    batch_size: 512           # NaN 방지를 위해 256→512
+    batch_size: 1024           # NaN 방지를 위해 256→512
     learning_rate: 0.001
     epochs: 100
     patience: 10
@@ -159,9 +159,9 @@ hardware:
 # ============================================================================
 tuning:
   learning_rate: [0.001, 0.0001]
-  encoder_learning_rate: [0.001, 0.0001]
-  epochs: [10, 30]
-  disease_ratio_lambda: [0.0, 0.05, 0.1]
+  encoder_learning_rate: [0.0001]
+  epochs: [50]
+  disease_ratio_lambda: [0.0, 0.1]
   metric: "auc"
   results_file: "tuning_results.csv"
   save_top_k: 3
