@@ -14,7 +14,7 @@ paths:
   project_root: "${paths.data_root}/scMILDQ_Cond"
 
   # Pretrained encoder 경로 (이 config로 학습 후 생성될 경로)
-  pretrained_encoder: "${paths.project_root}/results/pretrained_skfold_512_celltype/vq_aenb_conditional_whole.pth"
+  pretrained_encoder: "${paths.project_root}/results/pretrained_skfold_512_celltype_v2/vq_aenb_conditional.pth"
 
   # 결과 저장 디렉토리
   output_root: "${paths.project_root}/results"
@@ -49,7 +49,7 @@ data:
   conditional_embedding:
     column: "study"
     encoded_column: "study_id_numeric"
-    mapping_path: "${paths.project_root}/results/pretrained_skfold_512_celltype/study_mapping.json"
+    mapping_path: "${paths.project_root}/results/pretrained_skfold_512_celltype_v2/study_mapping.json"
 
 # ============================================================================
 # 데이터 분할 설정
@@ -82,7 +82,7 @@ encoder:
     # Celltype auxiliary classification loss
     celltype_aux:
       enabled: true                     # ← 활성화
-      column: "celltype_lineage"        # adata.obs 컬럼명
+      column: "celltype_lineage_v2"        # adata.obs 컬럼명
       loss_weight: 0.1                  # Auxiliary loss 가중치
       hidden_dim: 64                    # Classifier hidden dimension
       n_layers: 1                       # Hidden layer 수
@@ -118,7 +118,7 @@ mil:
     orthogonal_projection_lambda: 0.2
     disease_ratio_reg:
       enabled: false
-      lambda_weight: 0.1
+      lambda_weight: 0.0
       alpha: 1.0
       beta: 1.0
 
