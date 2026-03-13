@@ -239,8 +239,15 @@ def encode_celltype_labels(
         celltype_ids = np.full(adata.n_obs, -1, dtype=np.int64)
         return celltype_ids, {}, 0
 
-    # Get raw values, fill NaN with missing_label
-    raw_labels = adata.obs[celltype_col].fillna(missing_label).values
+    # Get raw values as string, fill NaN with missing_label
+    # .astype(str) handles Categorical dtype safely
+    raw_labels = adata.obs[celltype_col].astype(str).fillna(missing_label).values
+    # np.nan → "nan" via astype(str), treat as missing too
+    raw_labels = np.where(
+        (raw_labels == "nan") | (raw_labels == "None") | (raw_labels == ""),
+        missing_label,
+        raw_labels,
+    )
 
     # Build mapping excluding the sentinel
     unique_labels = sorted(set(raw_labels) - {missing_label})
