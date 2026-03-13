@@ -74,7 +74,7 @@ encoder:
 
   # 학습 설정 (pretrain용)
   pretrain:
-    batch_size: 1024           # NaN 방지를 위해 256→512
+    batch_size: 2048           # NaN 방지를 위해 256→512
     learning_rate: 0.001
     epochs: 100
     patience: 10
@@ -83,8 +83,8 @@ encoder:
     celltype_aux:
       enabled: true                     # ← 활성화
       column: "celltype_lineage_v2"        # adata.obs 컬럼명
-      loss_weight: 0.1                  # Auxiliary loss 가중치
-      hidden_dim: 64                    # Classifier hidden dimension
+      loss_weight: 0.2                  # Auxiliary loss 가중치
+      hidden_dim: 128                  # Classifier hidden dimension
       n_layers: 1                       # Hidden layer 수
       missing_label: "MISSING"          # 미주석 세포 sentinel value
       dropout: 0.1
