@@ -77,7 +77,8 @@ FAILED_LIST=""
 # ===========================
 format_weight() {
     # 0.05 → 005, 0.1 → 010, 0.2 → 020
-    printf "%03.0f" "$(echo "$1 * 100" | bc)"
+    # bc 없이 awk 사용
+    echo "$1" | awk '{printf "%03d", $1 * 100}'
 }
 
 check_existing() {
