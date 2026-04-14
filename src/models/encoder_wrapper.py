@@ -78,6 +78,18 @@ class VQEncoderWrapper(nn.Module):
         for param in self.vq_model.parameters():
             param.requires_grad = True
 
+    def train(self, mode: bool = True):
+        """Keep the wrapped VQ encoder in eval mode even when the parent
+        MIL pipeline flips to train. The Quantizer's training branch
+        mutates codebook state (code_usage decay, dead-code revive, and
+        EMA codebook update when enabled); on a frozen encoder these
+        side-effects silently drift the codebook during downstream
+        training, which can produce NaN scores if a code collapses.
+        """
+        super().train(mode)
+        self.vq_model.eval()
+        return self
+
     def get_trainable_parameters(self):
         """Return only trainable parameters (projection layer if frozen)."""
         if self.projection is not None:
@@ -178,6 +190,14 @@ class VQEncoderWrapperConditional(nn.Module):
         """Unfreeze all parameters."""
         for param in self.vq_model.parameters():
             param.requires_grad = True
+
+    def train(self, mode: bool = True):
+        """Keep the wrapped VQ encoder in eval mode even when the parent
+        MIL pipeline flips to train. See VQEncoderWrapper.train docstring.
+        """
+        super().train(mode)
+        self.vq_model.eval()
+        return self
 
     def get_trainable_parameters(self):
         """Return only trainable parameters (projection layer if frozen)."""
