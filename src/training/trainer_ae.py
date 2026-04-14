@@ -274,11 +274,33 @@ class AETrainer:
             # Backward
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=1.0
+            )
+            ct_norm = None
             if self.celltype_classifier is not None:
-                torch.nn.utils.clip_grad_norm_(
+                ct_norm = torch.nn.utils.clip_grad_norm_(
                     self.celltype_classifier.parameters(), max_norm=1.0
                 )
+            # Gradient-level NaN guard. A single NaN grad poisons
+            # clip_grad_norm_ (total_norm=NaN → clip_coef=NaN → every
+            # grad becomes NaN after scaling) which then NaN-updates
+            # every parameter on optimizer.step(). NB/lgamma on edge
+            # values produces this even when `loss` itself is finite,
+            # so we must check grads post-backward, not just loss.
+            if not torch.isfinite(total_norm) or (
+                ct_norm is not None and not torch.isfinite(ct_norm)
+            ):
+                if not getattr(self, "_warned_nan_grad", False):
+                    print(
+                        f"[AETrainer] WARN: non-finite gradient "
+                        f"(model_norm={float(total_norm)} "
+                        f"ct_norm={float(ct_norm) if ct_norm is not None else 'n/a'}) "
+                        f"— skipping step. Subsequent non-finite grads silenced."
+                    )
+                    self._warned_nan_grad = True
+                optimizer.zero_grad(set_to_none=True)
+                continue
             optimizer.step()
 
             total_loss += loss.item()
