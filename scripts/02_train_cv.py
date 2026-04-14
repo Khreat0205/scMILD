@@ -185,7 +185,11 @@ def create_models(config: ScMILDConfig, device: torch.device, encoder_path: str)
         study_emb_dim=model_config.get('conditional_emb_dim', model_config.get('study_emb_dim', 16)),
         num_codes=model_config.get('num_codes', 1024),
     )
-    encoder_model.load_state_dict(checkpoint['model_state_dict'])
+    # strict=False so pretrain-only buffers (e.g. quantizer EMA stats when
+    # the encoder was pretrained with ema_update=True) are silently
+    # discarded here — they are training-time statistics and have no role
+    # in frozen downstream inference.
+    encoder_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     encoder_model.to(device)
 
     # Wrap encoder
