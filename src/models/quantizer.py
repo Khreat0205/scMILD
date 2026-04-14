@@ -227,7 +227,13 @@ class Quantizer(nn.Module):
 
             # EMA codebook update (before revive, so freshly-moved codes
             # are not overwritten by EMA smoothing in the same step).
-            if self.ema_update:
+            # Guard: a single non-finite z row would poison the EMA
+            # buffers and produce a NaN codebook for the rest of
+            # training. If the input is non-finite we skip the EMA
+            # update entirely and let the trainer's batch-level
+            # non-finite check decide whether to skip the optimizer
+            # step as well.
+            if self.ema_update and torch.isfinite(z).all():
                 with torch.no_grad():
                     # Accumulate RAW z (not unit-normed even for cosine).
                     # Matching above re-normalizes via F.normalize, so

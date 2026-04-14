@@ -4,6 +4,8 @@ Autoencoder Trainer for scMILD.
 VQ-AENB 및 VQ-AENB-Conditional 학습을 담당합니다.
 """
 
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -139,7 +141,22 @@ class AETrainer:
             else:
                 monitor_loss = train_loss
 
-            # Early stopping
+            # Early stopping.
+            # `best_state` must only advance on finite monitor_loss —
+            # otherwise a NaN epoch (e.g., gradient blowup on the first
+            # step) keeps best_state=None and we eventually save whatever
+            # NaN parameters happen to be in self.model at training end.
+            # Additionally, on a non-finite epoch we fail fast instead of
+            # silently letting the model drift into NaN for the rest of
+            # training.
+            if not math.isfinite(monitor_loss):
+                print(
+                    f"[AETrainer] FATAL: monitor_loss is non-finite at "
+                    f"epoch {epoch} (train={train_loss} "
+                    f"commit={commit_loss} ct={ct_loss}). "
+                    f"Aborting training loop."
+                )
+                break
             if monitor_loss < best_loss:
                 best_loss = monitor_loss
                 best_state = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
@@ -164,9 +181,19 @@ class AETrainer:
                     msg += f" - CT Loss: {ct_loss:.4f}"
                 print(msg)
 
-        # Load best model
-        if best_state is not None:
-            self.model.load_state_dict(best_state)
+        # Load best model.
+        # If best_state was never set (every epoch's monitor_loss was
+        # non-finite, so nothing ever beat inf) we MUST NOT silently
+        # return self.model in its current (likely NaN) state — the
+        # caller will save it to disk and poison downstream MIL.
+        if best_state is None:
+            raise RuntimeError(
+                "AETrainer: best_state was never assigned — "
+                "every epoch's monitor_loss was non-finite. "
+                "The current model parameters are likely NaN. "
+                "Check learning rate, input scaling, and EMA stability."
+            )
+        self.model.load_state_dict(best_state)
         if best_classifier_state is not None and self.celltype_classifier is not None:
             self.celltype_classifier.load_state_dict(best_classifier_state)
 
@@ -226,6 +253,24 @@ class AETrainer:
             # Total loss
             loss = recon_loss + commit_loss + self.celltype_loss_weight * ct_loss
 
+            # Skip non-finite batches: stepping on a NaN loss produces
+            # NaN grads → NaN params → NaN codebook via EMA → permanent
+            # poisoning. We drop the batch and continue; if it keeps
+            # recurring, the epoch-level finite check will abort training
+            # with a clear error instead of silently saving a NaN model.
+            if not torch.isfinite(loss):
+                if not getattr(self, "_warned_nan_batch", False):
+                    print(
+                        f"[AETrainer] WARN: non-finite batch loss "
+                        f"(recon={float(recon_loss)} "
+                        f"commit={float(commit_loss)} "
+                        f"ct={float(ct_loss)}) — skipping step. "
+                        f"Subsequent non-finite batches silenced."
+                    )
+                    self._warned_nan_batch = True
+                optimizer.zero_grad(set_to_none=True)
+                continue
+
             # Backward
             optimizer.zero_grad()
             loss.backward()
@@ -241,6 +286,10 @@ class AETrainer:
             total_ct_loss += ct_loss.item()
             n_batches += 1
 
+        if n_batches == 0:
+            # All batches were non-finite. Return inf so the epoch-level
+            # check in train() sees a non-finite monitor_loss and aborts.
+            return float("inf"), float("inf"), float("inf")
         return total_loss / n_batches, total_commit_loss / n_batches, total_ct_loss / n_batches
 
     @torch.no_grad()

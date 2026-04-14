@@ -76,7 +76,10 @@ encoder:
     batch_size: 2048
     learning_rate: 0.0001
     epochs: 20                  # small: 100 → 20
-    patience: 5
+    patience: 100               # small 실험 중 early stop 실질 무효화
+                                # (ep4 조기종료 문제: train loss 가 첫 epoch 에서
+                                #  NaN/정체되면 best_state 가 안 잡혀서
+                                #  near-init 체크포인트가 저장됨)
 
     celltype_aux:
       enabled: true
