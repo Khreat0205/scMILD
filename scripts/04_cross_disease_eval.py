@@ -58,6 +58,8 @@ def load_trained_models(model_dir: str, device: torch.device, config: ScMILDConf
         n_conditionals=model_config.get('n_conditionals', model_config.get('n_studies')),
         conditional_emb_dim=model_config.get('conditional_emb_dim', model_config.get('study_emb_dim', 16)),
         num_codes=model_config.get('num_codes', 1024),
+        loss_type=model_config.get('loss_type', 'nb'),
+        input_transform=model_config.get('input_transform', 'none'),
     )
     # strict=False: discard pretrain-only quantizer EMA buffers if present.
     encoder_model.load_state_dict(checkpoint['model_state_dict'], strict=False)

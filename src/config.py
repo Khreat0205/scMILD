@@ -118,6 +118,17 @@ class EncoderConfig:
     num_codes: int = 1024
     conditional_emb_dim: int = 16  # Conditional embedding dimension
     hidden_layers: List[int] = field(default_factory=lambda: [512, 256, 128])  # Encoder/Decoder hidden layers
+    # Reconstruction loss family.
+    #   "nb"  — default, Negative Binomial on raw counts (legacy scMILD).
+    #   "mse" — MSE on (optionally transformed) target. Decoder becomes
+    #           single-head (output_dim = input_dim). Far more stable
+    #           numerically than NB on raw counts because it avoids
+    #           lgamma / exp edge cases that produce NaN gradients.
+    loss_type: str = "nb"
+    # Input transform applied inside encoder_forward AND to the MSE
+    # target in the trainer. "log1p" standardizes large raw counts so
+    # the first Linear layer does not blow up on extreme values.
+    input_transform: str = "none"
     pretrain: EncoderPretrainConfig = field(default_factory=EncoderPretrainConfig)
     quantizer: QuantizerConfig = field(default_factory=QuantizerConfig)
 
@@ -417,6 +428,8 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
         num_codes=encoder_dict.get("num_codes", 1024),
         conditional_emb_dim=conditional_emb_dim,
         hidden_layers=encoder_dict.get("hidden_layers", [512, 256, 128]),
+        loss_type=encoder_dict.get("loss_type", "nb"),
+        input_transform=encoder_dict.get("input_transform", "none"),
         pretrain=pretrain,
         quantizer=quantizer,
     )

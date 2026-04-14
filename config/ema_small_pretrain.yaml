@@ -65,6 +65,11 @@ encoder:
   num_codes: 256                # small: 512 → 256
   conditional_emb_dim: 16
 
+  # NB loss 는 raw count + lgamma/exp edge 에서 gradient NaN 이 자주
+  # 발생. log1p 로 입력 정규화 + MSE recon 으로 수치 안정화.
+  loss_type: "mse"
+  input_transform: "log1p"
+
   # Quantizer: EMA codebook update 켜기
   quantizer:
     commitment_weight: 0.25

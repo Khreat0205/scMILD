@@ -284,6 +284,8 @@ def main():
     # Create model
     print("\nCreating VQ-AENB-Conditional model...")
     qcfg = getattr(config.encoder, "quantizer", None)
+    loss_type = getattr(config.encoder, "loss_type", "nb")
+    input_transform = getattr(config.encoder, "input_transform", "none")
     model = VQ_AENB_Conditional(
         input_dim=input_dim,
         latent_dim=latent_dim,
@@ -296,7 +298,10 @@ def main():
         ema_update=qcfg.ema_update if qcfg else False,
         ema_decay=qcfg.ema_decay if qcfg else 0.99,
         ema_eps=qcfg.ema_eps if qcfg else 1e-5,
+        loss_type=loss_type,
+        input_transform=input_transform,
     )
+    print(f"  Loss type: {loss_type}  Input transform: {input_transform}")
     model.to(device)
 
     print(f"  Latent dim: {latent_dim}")
@@ -339,6 +344,8 @@ def main():
         'conditional_emb_dim': conditional_emb_dim,
         'study_emb_dim': conditional_emb_dim,  # Backward compatibility
         'num_codes': num_codes,
+        'loss_type': loss_type,
+        'input_transform': input_transform,
     }
     trainer.save(str(model_path), config_to_save)
 

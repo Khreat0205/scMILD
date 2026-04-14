@@ -247,8 +247,15 @@ class AETrainer:
                     mu, theta = output
                     commit_loss = torch.tensor(0.0, device=self.device)
 
-            # Reconstruction loss
-            recon_loss = negative_binomial_loss(mu, theta, data)
+            # Reconstruction loss. When loss_type="mse", the decoder's
+            # first tensor IS the reconstruction and `theta` is None.
+            # The target is `model.transform_input(data)` so encoder and
+            # loss agree on the data space (e.g. log1p).
+            if theta is None:
+                target = self.model.transform_input(data)
+                recon_loss = F.mse_loss(mu, target)
+            else:
+                recon_loss = negative_binomial_loss(mu, theta, data)
 
             # Total loss
             loss = recon_loss + commit_loss + self.celltype_loss_weight * ct_loss
@@ -357,7 +364,11 @@ class AETrainer:
                     mu, theta = output
                     commit_loss = torch.tensor(0.0, device=self.device)
 
-            recon_loss = negative_binomial_loss(mu, theta, data)
+            if theta is None:
+                target = self.model.transform_input(data)
+                recon_loss = F.mse_loss(mu, target)
+            else:
+                recon_loss = negative_binomial_loss(mu, theta, data)
             loss = recon_loss + commit_loss + self.celltype_loss_weight * ct_loss
 
             total_loss += loss.item()

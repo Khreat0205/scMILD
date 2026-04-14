@@ -346,6 +346,8 @@ class VQ_AENB_Conditional(nn.Module):
         ema_update: bool = False,
         ema_decay: float = 0.99,
         ema_eps: float = 1e-5,
+        loss_type: str = "nb",
+        input_transform: str = "none",
         # Deprecated parameters (for backward compatibility)
         n_studies: int = None,
         study_emb_dim: int = None,
@@ -371,6 +373,8 @@ class VQ_AENB_Conditional(nn.Module):
         self.commitment_weight = commitment_weight
         self.n_conditionals = n_conditionals
         self.conditional_emb_dim = conditional_emb_dim
+        self.loss_type = loss_type
+        self.input_transform = input_transform
 
         # Backward compatibility aliases
         self.n_studies = n_conditionals
@@ -401,17 +405,28 @@ class VQ_AENB_Conditional(nn.Module):
             ema_eps=ema_eps,
         )
 
-        # Decoder: latent_dim + conditional_emb_dim → input_dim * 2
+        # Decoder: latent_dim + conditional_emb_dim → input_dim*2 (NB: mu+theta)
+        # or input_dim (MSE: single reconstruction head).
         decoder_layers = []
         previous_dim = latent_dim + conditional_emb_dim  # Conditional input
         for layer_dim in reversed(self.hidden_layers):
             decoder_layers.append(nn.Linear(previous_dim, layer_dim))
             decoder_layers.append(self.activation_function())
             previous_dim = layer_dim
-        decoder_layers.append(nn.Linear(previous_dim, input_dim * 2))
+        dec_out = input_dim * 2 if self.loss_type == "nb" else input_dim
+        decoder_layers.append(nn.Linear(previous_dim, dec_out))
         self.decoder_layers = nn.Sequential(*decoder_layers)
 
         self._initialize_weights()
+
+    def transform_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply the configured input transform. Shared by encoder_forward
+        and the trainer's loss-target computation so there is exactly one
+        source of truth.
+        """
+        if self.input_transform == "log1p":
+            return torch.log1p(x)
+        return x
 
     def encoder_forward(
         self,
@@ -419,6 +434,7 @@ class VQ_AENB_Conditional(nn.Module):
         conditional_ids: torch.Tensor
     ) -> torch.Tensor:
         """Encode input with conditional information to continuous latent representation."""
+        x = self.transform_input(x)
         c_emb = self.conditional_embedding(conditional_ids)  # (batch, conditional_emb_dim)
         x_cond = torch.cat([x, c_emb], dim=-1)   # (batch, input_dim + conditional_emb_dim)
         return self.encoder(x_cond)
@@ -431,11 +447,21 @@ class VQ_AENB_Conditional(nn.Module):
         self,
         z: torch.Tensor,
         conditional_ids: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Decode latent representation with conditional information."""
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Decode latent representation with conditional information.
+
+        Returns:
+            For NB: (mu_recon, theta_recon) — decoder splits its output
+                into (mu, theta) via exp / softplus.
+            For MSE: (recon, None) — decoder produces a single head,
+                no output activation (target lives in R^n after the
+                input transform, e.g. log1p of raw counts).
+        """
         c_emb = self.conditional_embedding(conditional_ids)  # (batch, conditional_emb_dim)
         z_cond = torch.cat([z, c_emb], dim=-1)   # (batch, latent_dim + conditional_emb_dim)
         decoded = self.decoder_layers(z_cond)
+        if self.loss_type == "mse":
+            return decoded, None
         mu_recon = torch.exp(decoded[:, :self.input_dim]).clamp(1e-6, 1e6)
         theta_recon = F.softplus(decoded[:, self.input_dim:]).clamp(1e-4, 1e4)
         return mu_recon, theta_recon
