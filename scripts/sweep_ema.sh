@@ -60,13 +60,22 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- resolve project_root / sweep dir --------------------------------------
-PROJECT_ROOT=$(python - <<PY
+# --- resolve sweep dir ------------------------------------------------------
+# BASE_PRETRAIN 의 output_root (예: <proj>/results/ema_small) 의 형제
+# 디렉토리로 ema_sweep 을 둔다. PathsConfig 에는 project_root 속성이
+# 없어서 (yaml-only 변수) output_root 를 기준으로 잡는 게 안전.
+SWEEP_PARENT=$(python - <<PY
+import os
 from src.config import load_config
-print(load_config("${BASE_PRETRAIN}").paths.project_root)
+out = load_config("${BASE_PRETRAIN}").paths.output_root
+print(os.path.dirname(out.rstrip("/")))
 PY
 )
-SWEEP_DIR="${PROJECT_ROOT}/results/ema_sweep/${SWEEP_TAG}"
+if [ -z "${SWEEP_PARENT}" ]; then
+    echo "[FATAL] Could not resolve sweep parent dir from ${BASE_PRETRAIN}"
+    exit 2
+fi
+SWEEP_DIR="${SWEEP_PARENT}/ema_sweep/${SWEEP_TAG}"
 CFG_DIR="${SWEEP_DIR}/configs"
 RUN_DIR="${SWEEP_DIR}/runs"
 MASTER_CSV="${SWEEP_DIR}/master_results.csv"
