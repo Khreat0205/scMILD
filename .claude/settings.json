@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//private/tmp/**)",
-      "Bash(bash -n /Users/khreat/Documents/GitHub/scMILD/scripts/run_ema_small.sh)"
+      "Bash(bash -n /Users/khreat/Documents/GitHub/scMILD/scripts/run_ema_small.sh)",
+      "Bash(bash -n /Users/khreat/Documents/GitHub/scMILD/scripts/sweep_ema.sh)"
     ]
   }
 }
