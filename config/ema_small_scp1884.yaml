@@ -1,0 +1,41 @@
+# scMILD - EMA Small - SCP1884 (CD) subset
+# =========================================
+# Inherits ema_small_pretrain.yaml and narrows to SCP1884 subset.
+
+_base_: "ema_small_pretrain.yaml"
+
+paths:
+  output_root: "${paths.project_root}/results/ema_small/scp1884"
+
+data:
+  subset:
+    enabled: true
+    column: "study"
+    values:
+      - "SCP1884"
+
+  info:
+    name: "SCP1884"
+    disease: "CD"
+    control_status: "ctrl_colon"
+    disease_status: "CD"
+    n_samples: 34
+
+splitting:
+  strategy: "stratified_kfold"
+  n_splits: 5
+  n_repeats: 1
+  random_seed: 42
+
+mil:
+  latent_dim: 128
+  training:
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0001
+    epochs: 30
+    use_early_stopping: false
+
+  # SCP1884 는 세포 수가 많아 subsampling 유지
+  subsampling:
+    enabled: true
+    max_cells_per_sample: 5000

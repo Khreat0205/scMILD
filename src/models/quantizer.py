@@ -21,6 +21,11 @@ class Quantizer(nn.Module):
         code_dim: Dimension of each code vector
         decay: Decay rate for exponential moving average of code usage
         commitment_weight: Weight for commitment loss
+        ema_update: If True, update codebook weights in-place via EMA
+            statistics (van den Oord 2017, Appendix A.1) instead of leaving
+            them frozen after k-means init. Commitment loss is unchanged.
+        ema_decay: EMA decay for cluster size / embedding sums.
+        ema_eps: Laplace smoothing epsilon for cluster sizes.
     """
 
     def __init__(
@@ -28,7 +33,10 @@ class Quantizer(nn.Module):
         num_codes: int = 256,
         code_dim: int = 128,
         decay: float = 0.9,
-        commitment_weight: float = 0.25
+        commitment_weight: float = 0.25,
+        ema_update: bool = False,
+        ema_decay: float = 0.99,
+        ema_eps: float = 1e-5,
     ):
         super().__init__()
 
@@ -42,6 +50,22 @@ class Quantizer(nn.Module):
 
         # Track codebook usage
         self.register_buffer("code_usage", torch.zeros(self.num_codes))
+
+        # EMA codebook update (Oord 2017 §Appendix A.1). When enabled, the
+        # codebook weights are updated in-place each training step from the
+        # running cluster statistics instead of remaining frozen after
+        # k-means init — without an EMA path, straight-through reassignment
+        # (z_q = z + (z_q - z).detach()) discards the only gradient that
+        # could reach codebook.weight, so codes stay at their init values.
+        self.ema_update = ema_update
+        self.ema_decay = ema_decay
+        self.ema_eps = ema_eps
+        if ema_update:
+            self.register_buffer("ema_cluster_size", torch.zeros(self.num_codes))
+            self.register_buffer(
+                "ema_embedding_sum", torch.zeros(self.num_codes, self.code_dim)
+            )
+            self.register_buffer("ema_initialized", torch.tensor(False))
 
         # Initialize codebook
         self.codebook.weight.data.uniform_(-1.0 / self.num_codes, 1.0 / self.num_codes)
@@ -58,9 +82,17 @@ class Quantizer(nn.Module):
             # Random initialization from data
             if data.shape[0] >= self.num_codes:
                 indices = torch.randperm(data.shape[0])[:self.num_codes]
-                self.codebook.weight.data.copy_(data[indices])
+                centers_t = data[indices].detach().cpu().float()
+                self.codebook.weight.data.copy_(centers_t)
+                if self.ema_update:
+                    self._prime_ema_from_assignments(
+                        raw_data_t=data.detach().cpu().float(),
+                        centers_t=centers_t,
+                    )
             else:
-                self.codebook.weight.data.uniform_(-1.0 / self.num_codes, 1.0 / self.num_codes)
+                self.codebook.weight.data.uniform_(
+                    -1.0 / self.num_codes, 1.0 / self.num_codes
+                )
 
         elif method == "kmeans":
             # K-means initialization (requires faiss)
@@ -78,9 +110,26 @@ class Quantizer(nn.Module):
                 )
                 kmeans.train(data_np)
 
-                # Get cluster centers
+                # Get cluster centers (unit-norm due to spherical=True)
                 centers = kmeans.centroids
-                self.codebook.weight.data.copy_(torch.from_numpy(centers))
+
+                if self.ema_update:
+                    # EMA path: overwrite codebook with raw-scale cluster
+                    # means so codebook entries live at the natural scale of
+                    # z. Matching is still cosine via F.normalize at lookup,
+                    # so direction alone matters — but z_q must be at the
+                    # same scale as z for commitment loss to stay sane.
+                    # Unit-norming EMA sums would shrink the codebook to
+                    # 1/cluster_size and blow commit loss up as the encoder
+                    # drifts.
+                    raw_data_t = torch.from_numpy(data_np).float()
+                    centers_t = torch.from_numpy(centers).float()
+                    self._prime_ema_from_assignments(
+                        raw_data_t=raw_data_t, centers_t=centers_t
+                    )
+                else:
+                    # Legacy path: direct copy of unit-norm centers.
+                    self.codebook.weight.data.copy_(torch.from_numpy(centers))
             except ImportError:
                 print("Warning: faiss not installed. Using random initialization instead.")
                 self.init_codebook(data, method="random")
@@ -88,6 +137,49 @@ class Quantizer(nn.Module):
         elif method == "uniform":
             # Uniform initialization
             self.codebook.weight.data.uniform_(-1.0 / self.num_codes, 1.0 / self.num_codes)
+
+    def _prime_ema_from_assignments(
+        self,
+        raw_data_t: torch.Tensor,
+        centers_t: torch.Tensor,
+    ) -> None:
+        """
+        Prime EMA buffers so the first training-step EMA update does not
+        snap the codebook away from its freshly computed centers.
+
+        Assigns each raw sample to its nearest center under cosine
+        similarity (same metric as forward()), then seeds codebook.weight
+        AND ema_embedding_sum / ema_cluster_size from the raw-scale
+        per-cluster sums. Empty clusters fall back to the input centers.
+        """
+        cb_n = F.normalize(centers_t, dim=1)
+        raw_n = F.normalize(raw_data_t, dim=1)
+        sims = raw_n @ cb_n.t()
+        idx = sims.argmax(dim=1)
+
+        one_hot = torch.zeros(idx.shape[0], self.num_codes)
+        one_hot.scatter_(1, idx.unsqueeze(1), 1.0)
+        cluster_size = one_hot.sum(dim=0)
+        embedding_sum_raw = one_hot.t() @ raw_data_t  # (num_codes, D) raw scale
+
+        safe_size = cluster_size.clone().clamp_min_(1.0).unsqueeze(1)
+        centers_raw = embedding_sum_raw / safe_size
+        empty_mask = cluster_size == 0
+        if empty_mask.any():
+            centers_raw[empty_mask] = centers_t[empty_mask]
+
+        self.codebook.weight.data.copy_(centers_raw)
+        with torch.no_grad():
+            self.ema_cluster_size.copy_(cluster_size.to(self.ema_cluster_size.dtype))
+            self.ema_embedding_sum.copy_(
+                embedding_sum_raw.to(self.ema_embedding_sum.dtype)
+            )
+            self.ema_initialized.fill_(True)
+        print(
+            f"[Quantizer] EMA primed: {int((cluster_size > 0).sum())}/"
+            f"{self.num_codes} codes have >=1 sample, "
+            f"total={int(cluster_size.sum())}"
+        )
 
     def forward(self, z: torch.Tensor, return_info: bool = False):
         """
@@ -132,6 +224,41 @@ class Quantizer(nn.Module):
             z_q = z + (z_q - z).detach()
             avg_probs = torch.mean(one_hot, dim=0)
             self.code_usage.mul_(self.decay).add_(avg_probs, alpha=1 - self.decay)
+
+            # EMA codebook update (before revive, so freshly-moved codes
+            # are not overwritten by EMA smoothing in the same step).
+            if self.ema_update:
+                with torch.no_grad():
+                    # Accumulate RAW z (not unit-normed even for cosine).
+                    # Matching above re-normalizes via F.normalize, so
+                    # codebook direction is what matters — but z_q must
+                    # live at the same scale as z for commitment loss to
+                    # behave. Unit-norming EMA sums would shrink the
+                    # codebook to 1/cluster_size and make commit loss
+                    # explode as the encoder drifts.
+                    z_for_ema = z.detach()
+
+                    cluster_size_batch = one_hot.sum(dim=0)
+                    embedding_sum_batch = one_hot.t() @ z_for_ema
+
+                    d = self.ema_decay
+                    self.ema_cluster_size.mul_(d).add_(
+                        cluster_size_batch, alpha=1.0 - d
+                    )
+                    self.ema_embedding_sum.mul_(d).add_(
+                        embedding_sum_batch, alpha=1.0 - d
+                    )
+
+                    # Laplace smoothing keeps near-dead codes from exploding.
+                    n = self.ema_cluster_size.sum()
+                    smoothed = (
+                        (self.ema_cluster_size + self.ema_eps)
+                        / (n + self.num_codes * self.ema_eps)
+                        * n
+                    )
+                    self.codebook.weight.data.copy_(
+                        self.ema_embedding_sum / smoothed.unsqueeze(1)
+                    )
 
             # Deal with dead codes (low usage)
             self._revive_dead_codes(z, similarity)
@@ -187,7 +314,20 @@ class Quantizer(nn.Module):
             # Reinitialize dead codes
             dead_indices = torch.where(dead_codes)[0][:len(sample_indices)]
             with torch.no_grad():
-                self.codebook.weight[dead_indices] = z.detach()[sample_indices]
+                new_vecs = z.detach()[sample_indices]
+                self.codebook.weight[dead_indices] = new_vecs
+
+                # Keep EMA buffers consistent with the overwritten codebook.
+                # Without this, the next EMA step recomputes
+                # codebook = ema_embedding_sum / smoothed_cluster_size and
+                # would snap the revived code back toward its prior
+                # (near-zero) EMA state, undoing the revive.
+                if self.ema_update:
+                    self.ema_cluster_size[dead_indices] = 1.0
+                    self.ema_embedding_sum[dead_indices] = new_vecs
+                    # Reset usage EMA so the revived code is not declared
+                    # dead again on the next step.
+                    self.code_usage[dead_indices] = 1.0 / self.num_codes
 
     def _compute_perplexity(self, one_hot: torch.Tensor) -> torch.Tensor:
         """

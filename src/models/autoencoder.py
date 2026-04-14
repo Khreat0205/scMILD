@@ -144,7 +144,10 @@ class VQ_AENB(nn.Module):
         hidden_layers: List[int],
         num_codes: int = 256,
         commitment_weight: float = 0.25,
-        activation_function=nn.ReLU
+        activation_function=nn.ReLU,
+        ema_update: bool = False,
+        ema_decay: float = 0.99,
+        ema_eps: float = 1e-5,
     ):
         super().__init__()
         self.device = device
@@ -170,7 +173,10 @@ class VQ_AENB(nn.Module):
         self.quantizer = Quantizer(
             num_codes=num_codes,
             code_dim=latent_dim,
-            commitment_weight=commitment_weight
+            commitment_weight=commitment_weight,
+            ema_update=ema_update,
+            ema_decay=ema_decay,
+            ema_eps=ema_eps,
         )
 
         # Decoder
@@ -337,6 +343,9 @@ class VQ_AENB_Conditional(nn.Module):
         num_codes: int = 256,
         commitment_weight: float = 0.25,
         activation_function=nn.ReLU,
+        ema_update: bool = False,
+        ema_decay: float = 0.99,
+        ema_eps: float = 1e-5,
         # Deprecated parameters (for backward compatibility)
         n_studies: int = None,
         study_emb_dim: int = None,
@@ -386,7 +395,10 @@ class VQ_AENB_Conditional(nn.Module):
         self.quantizer = Quantizer(
             num_codes=num_codes,
             code_dim=latent_dim,
-            commitment_weight=commitment_weight
+            commitment_weight=commitment_weight,
+            ema_update=ema_update,
+            ema_decay=ema_decay,
+            ema_eps=ema_eps,
         )
 
         # Decoder: latent_dim + conditional_emb_dim → input_dim * 2

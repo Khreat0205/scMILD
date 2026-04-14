@@ -283,6 +283,7 @@ def main():
 
     # Create model
     print("\nCreating VQ-AENB-Conditional model...")
+    qcfg = getattr(config.encoder, "quantizer", None)
     model = VQ_AENB_Conditional(
         input_dim=input_dim,
         latent_dim=latent_dim,
@@ -291,7 +292,10 @@ def main():
         n_conditionals=n_conditionals,
         conditional_emb_dim=conditional_emb_dim,
         num_codes=num_codes,
-        commitment_weight=0.25
+        commitment_weight=qcfg.commitment_weight if qcfg else 0.25,
+        ema_update=qcfg.ema_update if qcfg else False,
+        ema_decay=qcfg.ema_decay if qcfg else 0.99,
+        ema_eps=qcfg.ema_eps if qcfg else 1e-5,
     )
     model.to(device)
 

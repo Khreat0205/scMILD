@@ -102,6 +102,15 @@ class EncoderPretrainConfig:
 
 
 @dataclass
+class QuantizerConfig:
+    """Quantizer (VQ codebook) 설정"""
+    commitment_weight: float = 0.25
+    ema_update: bool = False
+    ema_decay: float = 0.99
+    ema_eps: float = 1e-5
+
+
+@dataclass
 class EncoderConfig:
     """Encoder 설정"""
     type: str = "VQ_AENB_Conditional"
@@ -110,6 +119,7 @@ class EncoderConfig:
     conditional_emb_dim: int = 16  # Conditional embedding dimension
     hidden_layers: List[int] = field(default_factory=lambda: [512, 256, 128])  # Encoder/Decoder hidden layers
     pretrain: EncoderPretrainConfig = field(default_factory=EncoderPretrainConfig)
+    quantizer: QuantizerConfig = field(default_factory=QuantizerConfig)
 
     # Deprecated alias (for backward compatibility)
     study_emb_dim: Optional[int] = None
@@ -400,6 +410,7 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
     # Support both new (conditional_emb_dim) and old (study_emb_dim) config keys
     conditional_emb_dim = encoder_dict.get("conditional_emb_dim",
                                            encoder_dict.get("study_emb_dim", 16))
+    quantizer = _make_dataclass(QuantizerConfig, encoder_dict.get("quantizer"))
     encoder = EncoderConfig(
         type=encoder_dict.get("type", "VQ_AENB_Conditional"),
         latent_dim=encoder_dict.get("latent_dim", 128),
@@ -407,6 +418,7 @@ def _dict_to_config(d: dict) -> ScMILDConfig:
         conditional_emb_dim=conditional_emb_dim,
         hidden_layers=encoder_dict.get("hidden_layers", [512, 256, 128]),
         pretrain=pretrain,
+        quantizer=quantizer,
     )
 
     # MIL config (nested)

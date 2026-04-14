@@ -1,0 +1,156 @@
+# scMILD - EMA Codebook Small Test (Pretrain)
+# ===========================================
+# Quantizer EMA update (Oord 2017 App. A.1) 검증용 소규모 config.
+# Base: pretrain_celltype_aux_v3.yaml 스타일을 그대로 사용하되
+#       num_codes, epochs 등을 줄이고 encoder.quantizer.ema_update=true 로 설정.
+#
+# 실행:
+#   python scripts/01_pretrain_encoder.py \
+#     --config config/ema_small_pretrain.yaml --gpu 0 --register
+#
+# Register 시 pretrained_encoder 의 parent 디렉토리로 체크포인트 복사됨.
+
+# ============================================================================
+# 경로
+# ============================================================================
+paths:
+  data_root: "/home/bmi-user/workspace/data/HSvsCD"
+  project_root: "${paths.data_root}/scMILDQ_Cond"
+
+  # EMA small 실험 전용 pretrained 경로
+  pretrained_encoder: "${paths.project_root}/results/ema_small/pretrained/vq_aenb_conditional.pth"
+  output_root: "${paths.project_root}/results/ema_small"
+
+  conda_env: "/home/bmi-user/workspace/data/scvi-env"
+
+# ============================================================================
+# 데이터
+# ============================================================================
+data:
+  whole_adata_path: "${paths.project_root}/data/Whole_SCP_PCD_Skin_805k_6k_unified_v2.h5ad"
+
+  subset:
+    enabled: false
+    column: "study"
+    values: ["GSE220116", "GSE175990", "SCP1884"]
+    cache_dir: "${paths.project_root}/cache"
+    use_cache: true
+
+  columns:
+    sample_id: "sample_id_numeric"
+    sample_name: "sample"
+    disease_label: "disease_numeric"
+    status: "Status"
+
+  conditional_embedding:
+    column: "study"
+    encoded_column: "study_id_numeric"
+    mapping_path: "${paths.project_root}/results/ema_small/pretrained/study_mapping.json"
+
+# ============================================================================
+# 데이터 분할 (skin/scp config 에서 override 됨)
+# ============================================================================
+splitting:
+  strategy: "stratified_kfold"
+  n_splits: 5
+  n_repeats: 1
+  random_seed: 42
+
+# ============================================================================
+# Encoder (EMA ON)
+# ============================================================================
+encoder:
+  type: "VQ_AENB_Conditional"
+  latent_dim: 128
+  num_codes: 256                # small: 512 → 256
+  conditional_emb_dim: 16
+
+  # Quantizer: EMA codebook update 켜기
+  quantizer:
+    commitment_weight: 0.25
+    ema_update: true
+    ema_decay: 0.99
+    ema_eps: 1.0e-5
+
+  pretrain:
+    batch_size: 2048
+    learning_rate: 0.0001
+    epochs: 20                  # small: 100 → 20
+    patience: 5
+
+    celltype_aux:
+      enabled: true
+      column: "celltype_lineage_v2"
+      loss_weight: 0.1
+      hidden_dim: 16
+      n_layers: 1
+      missing_label: "MISSING"
+      dropout: 0.1
+
+# ============================================================================
+# MIL (base; subset config 에서 override)
+# ============================================================================
+mil:
+  latent_dim: 128
+  attention_dim: 128
+  num_classes: 2
+
+  freeze_encoder: true
+  use_projection: true
+  projection_dim: 128
+
+  training:
+    batch_size: 2
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0001
+    epochs: 30                  # small: 100 → 30
+    patience: 10
+    use_early_stopping: false
+
+  student:
+    enabled: true
+    optimize_period: 1
+
+  loss:
+    negative_weight: 0.3
+    orthogonal_projection_lambda: 0.2
+    disease_ratio_reg:
+      enabled: false
+      lambda_weight: 0.0
+      alpha: 1.0
+      beta: 1.0
+
+# ============================================================================
+# 평가
+# ============================================================================
+evaluation:
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "f1_score"
+    - "precision"
+    - "recall"
+
+  cell_scoring:
+    save_attention_scores: true
+    save_predictions: true
+
+logging:
+  level: "INFO"
+  save_format: "csv"
+  save_checkpoints: true
+  checkpoint_frequency: 10
+
+hardware:
+  device: "cuda"
+  gpu_ids: [0]
+  num_workers: 4
+
+tuning:
+  learning_rate: [0.0001]
+  encoder_learning_rate: [0.0001]
+  epochs: [30]
+  disease_ratio_lambda: [0.0]
+  metric: "auc"
+  results_file: "tuning_results.csv"
+  save_top_k: 1

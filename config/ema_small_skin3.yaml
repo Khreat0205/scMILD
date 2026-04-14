@@ -1,0 +1,39 @@
+# scMILD - EMA Small - Skin3 (HS) subset
+# ======================================
+# Inherits ema_small_pretrain.yaml and narrows to Skin3 subset for
+# within-disease CV, finalize, and cross-disease eval.
+
+_base_: "ema_small_pretrain.yaml"
+
+paths:
+  # CV / final / cross 결과는 이 하위 디렉토리로
+  output_root: "${paths.project_root}/results/ema_small/skin3"
+
+data:
+  subset:
+    enabled: true
+    column: "study"
+    values:
+      - "GSE175990"
+      - "GSE220116"
+
+  info:
+    name: "Skin3"
+    disease: "HS"
+    control_status: "ctrl_skin"
+    disease_status: "HS"
+    n_samples: 19
+
+splitting:
+  strategy: "stratified_kfold"
+  n_splits: 5
+  n_repeats: 1
+  random_seed: 42
+
+mil:
+  latent_dim: 128
+  training:
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0001
+    epochs: 30
+    use_early_stopping: false
