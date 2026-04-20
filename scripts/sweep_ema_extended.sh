@@ -177,19 +177,45 @@ format_tag() {
     echo "d${d_s}_c${c_s}_w${w_s}"
 }
 
-is_already_done() {
+# Returns: 0=fully done (skip), 1=pretrain done (rerun downstream), 2=nothing done (run all)
+check_exp_status() {
     local exp_tag=$1
     local exp_out_root="${RUN_DIR}/${exp_tag}"
-    # Done in current sweep
+    local pretrained=false
+    local cross_done=false
+
+    # Check current sweep dir
     if [ -f "${exp_out_root}/pretrained/vq_aenb_conditional.pth" ]; then
-        return 0
+        pretrained=true
     fi
-    # Done in existing sweep
-    if [ -n "${EXISTING_SWEEP_DIR}" ] && \
+    # Check existing sweep dir
+    if ! $pretrained && [ -n "${EXISTING_SWEEP_DIR}" ] && \
        [ -f "${EXISTING_SWEEP_DIR}/runs/${exp_tag}/pretrained/vq_aenb_conditional.pth" ]; then
-        return 0
+        pretrained=true
     fi
-    return 1
+
+    if ! $pretrained; then
+        return 2   # nothing done
+    fi
+
+    # Check if cross-eval results exist (both directions)
+    local skin_fin scp_fin s2c_dir c2s_dir
+    skin_fin=$(ls -1dt "${exp_out_root}/skin3/final_model_"* 2>/dev/null | head -1)
+    scp_fin=$(ls -1dt "${exp_out_root}/scp1884/final_model_"* 2>/dev/null | head -1)
+    if [ -n "${skin_fin}" ] && [ -n "${scp_fin}" ]; then
+        s2c_dir=$(ls -1dt "${skin_fin}/cross_eval_"* 2>/dev/null | head -1)
+        c2s_dir=$(ls -1dt "${scp_fin}/cross_eval_"* 2>/dev/null | head -1)
+        if [ -n "${s2c_dir}" ] && [ -f "${s2c_dir}/cross_eval_results.csv" ] && \
+           [ -n "${c2s_dir}" ] && [ -f "${c2s_dir}/cross_eval_results.csv" ]; then
+            cross_done=true
+        fi
+    fi
+
+    if $cross_done; then
+        return 0   # fully done
+    else
+        return 1   # pretrain done, downstream incomplete
+    fi
 }
 
 gen_configs() {
@@ -344,30 +370,41 @@ echo ""
 echo "[PREP] Building task list and distributing to ${N_WORKERS} workers …"
 
 # Collect all tasks into an array
+# Each task: "exp_tag decay codes commit skip_pretrain_flag"
 ALL_TASKS=()
-TOTAL=0; SKIP=0
+TOTAL=0; SKIP=0; RERUN=0
 for decay in "${DECAYS[@]}"; do
   for codes in "${NUM_CODES_LIST[@]}"; do
     for commit in "${COMMIT_WEIGHTS[@]}"; do
       TOTAL=$((TOTAL+1))
       exp_tag=$(format_tag "$decay" "$codes" "$commit")
 
-      if $SKIP_EXISTING && is_already_done "$exp_tag"; then
-          echo "  [SKIP] ${exp_tag}"
-          SKIP=$((SKIP+1))
-          continue
+      if $SKIP_EXISTING; then
+          check_exp_status "$exp_tag"
+          status_code=$?
+          if [ ${status_code} -eq 0 ]; then
+              echo "  [SKIP] ${exp_tag} (fully done)"
+              SKIP=$((SKIP+1))
+              continue
+          elif [ ${status_code} -eq 1 ]; then
+              echo "  [RERUN] ${exp_tag} (pretrain ok, downstream incomplete)"
+              gen_configs "$exp_tag" "$decay" "$codes" "$commit"
+              ALL_TASKS+=("${exp_tag} ${decay} ${codes} ${commit} --skip_pretrain")
+              RERUN=$((RERUN+1))
+              continue
+          fi
       fi
 
       # Generate configs eagerly (fast, no GPU needed)
       gen_configs "$exp_tag" "$decay" "$codes" "$commit"
 
-      ALL_TASKS+=("${exp_tag} ${decay} ${codes} ${commit}")
+      ALL_TASKS+=("${exp_tag} ${decay} ${codes} ${commit} ")
     done
   done
 done
 
 N_TASKS=${#ALL_TASKS[@]}
-echo "[PREP] ${N_TASKS} tasks to run (${SKIP} skipped of ${TOTAL} total)"
+echo "[PREP] ${N_TASKS} tasks to run (${SKIP} skipped, ${RERUN} rerun downstream of ${TOTAL} total)"
 
 if [ "${N_TASKS}" -eq 0 ]; then
     echo "[DONE] All experiments already completed."
@@ -412,13 +449,15 @@ run_worker() {
 
     local ok=0 fail=0 done_count=0
 
-    while IFS=' ' read -r exp_tag decay codes commit; do
+    while IFS=' ' read -r exp_tag decay codes commit extra_flags; do
         [ -z "${exp_tag}" ] && continue
         done_count=$((done_count+1))
         local exp_cfg_dir="${CFG_DIR}/${exp_tag}"
         local exp_out_root="${RUN_DIR}/${exp_tag}"
 
-        echo "[Worker ${worker_id}] [${done_count}] ${exp_tag} (GPU ${gpu_id})" | tee -a "${worker_log}"
+        local mode="full"
+        [ -n "${extra_flags}" ] && mode="rerun(${extra_flags})"
+        echo "[Worker ${worker_id}] [${done_count}] ${exp_tag} (GPU ${gpu_id}) [${mode}]" | tee -a "${worker_log}"
 
         # Run experiment with CUDA_VISIBLE_DEVICES
         local status
@@ -427,6 +466,7 @@ run_worker() {
                 --pretrain_cfg "${exp_cfg_dir}/pretrain.yaml" \
                 --skin3_cfg    "${exp_cfg_dir}/skin3.yaml" \
                 --scp_cfg      "${exp_cfg_dir}/scp1884.yaml" \
+                ${extra_flags} \
                 >> "${worker_log}" 2>&1; then
             status="OK"; ok=$((ok+1))
         else

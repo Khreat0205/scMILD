@@ -133,15 +133,15 @@ def create_test_dataloader(
             print(f"WARNING: Creating '{embedding_col}' from '{embedding_source_col}' without pretrain mapping!")
             adata.obs[embedding_col] = adata.obs[embedding_source_col].astype('category').cat.codes
 
-    # Extract data
+    # Extract data — keep on CPU; evaluate() moves batches to GPU via .to(device)
     if hasattr(adata.X, 'toarray'):
-        data = torch.tensor(adata.X.toarray(), dtype=torch.float32, device=device)
+        data = torch.tensor(adata.X.toarray(), dtype=torch.float32)
     else:
-        data = torch.tensor(np.array(adata.X), dtype=torch.float32, device=device)
+        data = torch.tensor(np.array(adata.X), dtype=torch.float32)
 
     # Sample IDs
     sample_ids = torch.tensor(
-        adata.obs[sample_col].values, dtype=torch.long, device=device
+        adata.obs[sample_col].values, dtype=torch.long
     )
 
     # Labels
@@ -149,12 +149,12 @@ def create_test_dataloader(
     sample_labels = adata.obs.groupby(sample_col)[label_col].first()
     labels = torch.tensor(
         [sample_labels[s] for s in unique_samples],
-        dtype=torch.long, device=device
+        dtype=torch.long
     )
 
     # Instance labels
     instance_labels = torch.tensor(
-        adata.obs[label_col].values, dtype=torch.long, device=device
+        adata.obs[label_col].values, dtype=torch.long
     )
 
     # Embedding IDs (study or organ) - use direct column value
@@ -162,7 +162,7 @@ def create_test_dataloader(
     if embedding_col in adata.obs.columns:
         embedding_ids = torch.tensor(
             adata.obs[embedding_col].values.astype(int),
-            dtype=torch.long, device=device
+            dtype=torch.long
         )
 
     # Create dataset

@@ -91,15 +91,15 @@ def create_dataloaders(
         mask = adata.obs[sample_col].isin(sample_list)
         split_adata = adata[mask]
 
-        # Extract data
+        # Extract data — keep on CPU; trainer moves batches to GPU via .to(device)
         if hasattr(split_adata.X, 'toarray'):
-            data = torch.tensor(split_adata.X.toarray(), dtype=torch.float32, device=device)
+            data = torch.tensor(split_adata.X.toarray(), dtype=torch.float32)
         else:
-            data = torch.tensor(np.array(split_adata.X), dtype=torch.float32, device=device)
+            data = torch.tensor(np.array(split_adata.X), dtype=torch.float32)
 
         # Sample IDs
         sample_ids = torch.tensor(
-            split_adata.obs[sample_col].values, dtype=torch.long, device=device
+            split_adata.obs[sample_col].values, dtype=torch.long
         )
 
         # Labels (unique per sample)
@@ -107,12 +107,12 @@ def create_dataloaders(
         sample_labels = split_adata.obs.groupby(sample_col)[label_col].first()
         labels = torch.tensor(
             [sample_labels[s] for s in unique_samples],
-            dtype=torch.long, device=device
+            dtype=torch.long
         )
 
         # Instance labels
         instance_labels = torch.tensor(
-            split_adata.obs[label_col].values, dtype=torch.long, device=device
+            split_adata.obs[label_col].values, dtype=torch.long
         )
 
         # Embedding IDs (study or organ) - use direct column value
@@ -120,7 +120,7 @@ def create_dataloaders(
         if embedding_col in split_adata.obs.columns:
             embedding_ids = torch.tensor(
                 split_adata.obs[embedding_col].values.astype(int),
-                dtype=torch.long, device=device
+                dtype=torch.long
             )
 
         return data, sample_ids, labels, instance_labels, embedding_ids
