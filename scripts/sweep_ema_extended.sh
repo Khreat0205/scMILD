@@ -100,8 +100,6 @@ RUN_DIR="${SWEEP_DIR}/runs"
 MASTER_CSV="${SWEEP_DIR}/master_results.csv"
 SWEEP_LOG="${SWEEP_DIR}/sweep.log"
 WORKER_DIR="${SWEEP_DIR}/workers"
-TASK_QUEUE="${SWEEP_DIR}/task_queue.txt"
-QUEUE_LOCK="${SWEEP_DIR}/.queue.lock"
 
 if ! $DRY_RUN; then
     mkdir -p "${CFG_DIR}" "${RUN_DIR}" "${WORKER_DIR}"
@@ -340,12 +338,13 @@ PY
 latest_dir() { ls -1dt "$1/"$2 2>/dev/null | head -n 1; }
 
 # ============================================================================
-# Build task queue
+# Build task list & distribute to workers (round-robin)
 # ============================================================================
 echo ""
-echo "[QUEUE] Building task list …"
-> "${TASK_QUEUE}"   # truncate
+echo "[PREP] Building task list and distributing to ${N_WORKERS} workers …"
 
+# Collect all tasks into an array
+ALL_TASKS=()
 TOTAL=0; SKIP=0
 for decay in "${DECAYS[@]}"; do
   for codes in "${NUM_CODES_LIST[@]}"; do
@@ -362,50 +361,59 @@ for decay in "${DECAYS[@]}"; do
       # Generate configs eagerly (fast, no GPU needed)
       gen_configs "$exp_tag" "$decay" "$codes" "$commit"
 
-      # Enqueue: "exp_tag decay codes commit"
-      echo "${exp_tag} ${decay} ${codes} ${commit}" >> "${TASK_QUEUE}"
+      ALL_TASKS+=("${exp_tag} ${decay} ${codes} ${commit}")
     done
   done
 done
 
-N_TASKS=$(wc -l < "${TASK_QUEUE}" | tr -d ' ')
-echo "[QUEUE] ${N_TASKS} tasks queued (${SKIP} skipped of ${TOTAL} total)"
+N_TASKS=${#ALL_TASKS[@]}
+echo "[PREP] ${N_TASKS} tasks to run (${SKIP} skipped of ${TOTAL} total)"
 
 if [ "${N_TASKS}" -eq 0 ]; then
     echo "[DONE] All experiments already completed."
     exit 0
 fi
 
+# Write per-worker task files (round-robin distribution)
+# Build GPU assignment array: [gpu0, gpu0, gpu1, gpu1, gpu2, gpu2, ...]
+WORKER_GPUS=()
+for gpu in "${GPUS[@]}"; do
+    for ((j=0; j<JOBS_PER_GPU; j++)); do
+        WORKER_GPUS+=("${gpu}")
+    done
+done
+
+for ((w=0; w<N_WORKERS; w++)); do
+    > "${WORKER_DIR}/tasks_${w}.txt"
+done
+
+for ((i=0; i<N_TASKS; i++)); do
+    w=$((i % N_WORKERS))
+    echo "${ALL_TASKS[$i]}" >> "${WORKER_DIR}/tasks_${w}.txt"
+done
+
+echo ""
+echo "[PREP] Task distribution:"
+for ((w=0; w<N_WORKERS; w++)); do
+    n=$(wc -l < "${WORKER_DIR}/tasks_${w}.txt" | tr -d ' ')
+    echo "  Worker ${w} (GPU ${WORKER_GPUS[$w]}): ${n} tasks"
+done
+
 # ============================================================================
-# Worker function — each worker grabs tasks from queue via flock
+# Worker function — processes its own pre-assigned task file
 # ============================================================================
 run_worker() {
     local worker_id=$1
     local gpu_id=$2
+    local task_file="${WORKER_DIR}/tasks_${worker_id}.txt"
     local worker_log="${WORKER_DIR}/worker_${worker_id}_gpu${gpu_id}.log"
 
     echo "[Worker ${worker_id}] Started on GPU ${gpu_id}, log: ${worker_log}"
 
     local ok=0 fail=0 done_count=0
 
-    while true; do
-        # Atomically grab next task from queue via flock
-        local line=""
-        line=$(
-            flock -x 200
-            l=$(head -n 1 "${TASK_QUEUE}" 2>/dev/null)
-            if [ -n "${l}" ]; then
-                tail -n +2 "${TASK_QUEUE}" > "${TASK_QUEUE}.tmp"
-                mv "${TASK_QUEUE}.tmp" "${TASK_QUEUE}"
-                echo "${l}"
-            fi
-        ) 200>"${QUEUE_LOCK}"
-
-        # No more tasks
-        [ -z "${line}" ] && break
-
-        local exp_tag decay codes commit
-        read -r exp_tag decay codes commit <<< "${line}"
+    while IFS=' ' read -r exp_tag decay codes commit; do
+        [ -z "${exp_tag}" ] && continue
         done_count=$((done_count+1))
         local exp_cfg_dir="${CFG_DIR}/${exp_tag}"
         local exp_out_root="${RUN_DIR}/${exp_tag}"
@@ -442,26 +450,16 @@ run_worker() {
         [ -n "${s2c_dir}"  ] && [ -f "${s2c_dir}/cross_eval_results.csv" ] && s2c_m=$(read_cross_metrics "${s2c_dir}/cross_eval_results.csv")
         [ -n "${c2s_dir}"  ] && [ -f "${c2s_dir}/cross_eval_results.csv" ] && c2s_m=$(read_cross_metrics "${c2s_dir}/cross_eval_results.csv")
 
-        # Thread-safe CSV append (flock on master CSV)
-        (
-            flock -x 201
-            echo "${exp_tag},${decay},${codes},${commit},${LOSS_TYPE:-inherit},${INPUT_TRANSFORM:-inherit},${EPOCHS:-inherit},${status},${skin_m},${scp_m},${s2c_m},${c2s_m},${exp_out_root}" \
-                >> "${MASTER_CSV}"
-        ) 201>"${MASTER_CSV}.lock"
+        # Append to master CSV (>> is atomic for lines < PIPE_BUF on Linux)
+        echo "${exp_tag},${decay},${codes},${commit},${LOSS_TYPE:-inherit},${INPUT_TRANSFORM:-inherit},${EPOCHS:-inherit},${status},${skin_m},${scp_m},${s2c_m},${c2s_m},${exp_out_root}" \
+            >> "${MASTER_CSV}"
 
         echo "[Worker ${worker_id}] ${exp_tag} → ${status}  skin=(${skin_m})  scp=(${scp_m})" | tee -a "${worker_log}"
-    done
+    done < "${task_file}"
 
     echo "[Worker ${worker_id}] Finished. OK=${ok} FAIL=${fail}" | tee -a "${worker_log}"
     return ${fail}
 }
-
-# Export functions and variables so subshells can access them
-export -f run_worker format_tag read_cv_metrics read_cross_metrics latest_dir is_already_done
-export PROJECT_ROOT_DIR SWEEP_DIR CFG_DIR RUN_DIR MASTER_CSV WORKER_DIR
-export TASK_QUEUE QUEUE_LOCK
-export LOSS_TYPE INPUT_TRANSFORM EPOCHS
-export SKIP_EXISTING EXISTING_SWEEP_DIR
 
 # ============================================================================
 # Launch workers
@@ -471,13 +469,9 @@ echo "[LAUNCH] Starting ${N_WORKERS} workers across GPUs [${GPUS[*]}] (${JOBS_PE
 echo ""
 
 WORKER_PIDS=()
-worker_id=0
-for gpu in "${GPUS[@]}"; do
-    for ((j=0; j<JOBS_PER_GPU; j++)); do
-        run_worker "${worker_id}" "${gpu}" &
-        WORKER_PIDS+=($!)
-        worker_id=$((worker_id+1))
-    done
+for ((w=0; w<N_WORKERS; w++)); do
+    run_worker "${w}" "${WORKER_GPUS[$w]}" &
+    WORKER_PIDS+=($!)
 done
 
 # Wait for all workers; track failures
