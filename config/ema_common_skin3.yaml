@@ -1,0 +1,35 @@
+# scMILD - EMA Common Cell Type - Skin3 (HS) subset
+# ===================================================
+_base_: "ema_common_pretrain.yaml"
+
+paths:
+  output_root: "${paths.project_root}/results/ema_common/skin3"
+
+data:
+  subset:
+    enabled: true
+    column: "study"
+    values:
+      - "GSE175990"
+      - "GSE220116"
+
+  info:
+    name: "Skin3"
+    disease: "HS"
+    control_status: "ctrl_skin"
+    disease_status: "HS"
+    n_samples: 19
+
+splitting:
+  strategy: "stratified_kfold"
+  n_splits: 5
+  n_repeats: 1
+  random_seed: 42
+
+mil:
+  latent_dim: 128
+  training:
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0001
+    epochs: 30
+    use_early_stopping: false

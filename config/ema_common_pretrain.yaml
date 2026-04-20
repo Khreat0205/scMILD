@@ -1,0 +1,155 @@
+# scMILD - EMA Codebook Common Cell Type (Pretrain)
+# ==================================================
+# ema_small_pretrain.yaml 과 동일하되,
+# unified_v2 매핑이 있는 common cell type 만 포함한 adata 사용.
+# → 기존 whole cell type 결과와 비교용.
+#
+# 실행:
+#   python scripts/01_pretrain_encoder.py \
+#     --config config/ema_common_pretrain.yaml --gpu 0 --register
+
+# ============================================================================
+# 경로
+# ============================================================================
+paths:
+  data_root: "/home/bmi-user/workspace/data/HSvsCD"
+  project_root: "${paths.data_root}/scMILDQ_Cond"
+
+  pretrained_encoder: "${paths.project_root}/results/ema_common/pretrained/vq_aenb_conditional.pth"
+  output_root: "${paths.project_root}/results/ema_common"
+
+  conda_env: "/home/bmi-user/workspace/data/scvi-env"
+
+# ============================================================================
+# 데이터 — common cell type subset h5ad 사용
+# ============================================================================
+data:
+  whole_adata_path: "${paths.project_root}/data/Whole_SCP_PCD_Skin_common_celltype_6k.h5ad"
+
+  subset:
+    enabled: false
+    column: "study"
+    values: ["GSE220116", "GSE175990", "SCP1884"]
+    cache_dir: "${paths.project_root}/cache"
+    use_cache: true
+
+  columns:
+    sample_id: "sample_id_numeric"
+    sample_name: "sample"
+    disease_label: "disease_numeric"
+    status: "Status"
+
+  conditional_embedding:
+    column: "study"
+    encoded_column: "study_id_numeric"
+    mapping_path: "${paths.project_root}/results/ema_common/pretrained/study_mapping.json"
+
+# ============================================================================
+# 데이터 분할
+# ============================================================================
+splitting:
+  strategy: "stratified_kfold"
+  n_splits: 5
+  n_repeats: 1
+  random_seed: 42
+
+# ============================================================================
+# Encoder (EMA ON) — ema_small 과 동일
+# ============================================================================
+encoder:
+  type: "VQ_AENB_Conditional"
+  latent_dim: 128
+  num_codes: 256
+  conditional_emb_dim: 16
+
+  loss_type: "mse"
+  input_transform: "log1p"
+
+  quantizer:
+    commitment_weight: 0.25
+    ema_update: true
+    ema_decay: 0.99
+    ema_eps: 1.0e-5
+
+  pretrain:
+    batch_size: 2048
+    learning_rate: 0.0001
+    epochs: 20
+    patience: 100
+
+    celltype_aux:
+      enabled: true
+      column: "celltype_unified_v2"
+      loss_weight: 0.1
+      hidden_dim: 16
+      n_layers: 1
+      missing_label: "MISSING"
+      dropout: 0.1
+
+# ============================================================================
+# MIL
+# ============================================================================
+mil:
+  latent_dim: 128
+  attention_dim: 128
+  num_classes: 2
+
+  freeze_encoder: true
+  use_projection: true
+  projection_dim: 128
+
+  training:
+    batch_size: 2
+    learning_rate: 0.0001
+    encoder_learning_rate: 0.0001
+    epochs: 30
+    patience: 10
+    use_early_stopping: false
+
+  student:
+    enabled: true
+    optimize_period: 1
+
+  loss:
+    negative_weight: 0.3
+    orthogonal_projection_lambda: 0.2
+    disease_ratio_reg:
+      enabled: false
+      lambda_weight: 0.0
+      alpha: 1.0
+      beta: 1.0
+
+# ============================================================================
+# 평가 / 로깅 / 하드웨어
+# ============================================================================
+evaluation:
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "f1_score"
+    - "precision"
+    - "recall"
+
+  cell_scoring:
+    save_attention_scores: true
+    save_predictions: true
+
+logging:
+  level: "INFO"
+  save_format: "csv"
+  save_checkpoints: true
+  checkpoint_frequency: 10
+
+hardware:
+  device: "cuda"
+  gpu_ids: [0]
+  num_workers: 4
+
+tuning:
+  learning_rate: [0.0001]
+  encoder_learning_rate: [0.0001]
+  epochs: [30]
+  disease_ratio_lambda: [0.0]
+  metric: "auc"
+  results_file: "tuning_results.csv"
+  save_top_k: 1
