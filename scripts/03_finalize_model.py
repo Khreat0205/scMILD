@@ -341,7 +341,8 @@ def main():
         student_optimize_period=config.mil.student.optimize_period,
         student_loss_weight_neg=config.mil.loss.negative_weight,
         disease_ratio=disease_ratio,
-        ratio_reg_lambda=disease_ratio_lambda
+        ratio_reg_lambda=disease_ratio_lambda,
+        opl_lambda=config.mil.loss.orthogonal_projection_lambda,
     )
 
     # Train

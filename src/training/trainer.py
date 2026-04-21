@@ -15,6 +15,7 @@ from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
 
 from .metrics import compute_metrics, find_optimal_threshold
+from .opl import OrthogonalProjectionLoss, compute_code_opl
 
 
 @dataclass
@@ -68,6 +69,8 @@ class MILTrainer:
         student_loss_weight_neg: float = 0.3,
         disease_ratio: Optional[Dict[int, float]] = None,
         ratio_reg_lambda: float = 0.0,
+        opl_lambda: float = 0.0,
+        opl_gamma: float = 0.5,
     ):
         self.model_teacher = model_teacher
         self.model_student = model_student
@@ -80,6 +83,13 @@ class MILTrainer:
         # Disease ratio regularization
         self.disease_ratio = disease_ratio
         self.ratio_reg_lambda = ratio_reg_lambda
+
+        # Codebook-level OPL
+        self.opl_lambda = opl_lambda
+        if opl_lambda > 0:
+            self.opl_criterion = OrthogonalProjectionLoss(gamma=opl_gamma)
+        else:
+            self.opl_criterion = None
 
         # For normalizing attention scores
         self.attn_score_min = 0.0
@@ -357,6 +367,15 @@ class MILTrainer:
                 self.student_loss_weight_neg * (1 - pseudo_labels) * torch.log(instance_probs[:, 0] + 1e-5) +
                 (1 - self.student_loss_weight_neg) * pseudo_labels * torch.log(instance_probs[:, 1] + 1e-5)
             )
+
+            # Codebook-level OPL
+            if self.opl_lambda > 0 and self.opl_criterion is not None:
+                opl_loss = compute_code_opl(
+                    self.model_encoder, self.model_teacher,
+                    self.device, self.opl_criterion,
+                )
+                if opl_loss.requires_grad:
+                    loss = loss + self.opl_lambda * opl_loss
 
             # Backward
             optimizer_student.zero_grad()
