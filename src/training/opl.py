@@ -81,7 +81,7 @@ def compute_code_opl(
         opl_loss: scalar tensor (0 if GMM fails or insufficient codes)
     """
     # 1. Get codebook embeddings (detached — codebook is EMA-updated, not grad-updated)
-    codebook = model_encoder.vq_model.quantize.codebook.weight.detach().to(device)  # (num_codes, latent_dim)
+    codebook = model_encoder.vq_model.quantizer.codebook.weight.detach().to(device)  # (num_codes, latent_dim)
 
     # 2. Project through projection layer (gradient flows through projection)
     if model_encoder.projection is not None:
